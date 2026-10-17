@@ -1,33 +1,327 @@
 import streamlit as st
+import streamlit.components.v1 as components
+try:
+    from streamlit_plugins.components.theme_changer import st_theme_changer
+except Exception:
+    st_theme_changer = None
 import mysql.connector
 import pandas as pd
+import altair as alt
 import random
 import string
 import os
 import time
-from datetime import datetime
-
-# ---------- Configuration & Setup ----------
+import hashlib
+import uuid
+from datetime import datetime, timezone
+# ---------- Systems Configuration ----------
 st.set_page_config(
-    page_title="AutoSpec | Elite Automotive Intelligence",
+    page_title="AutoSpec Web",
     page_icon="🚗",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
+    menu_items={
+        'Get Help': None,
+        'Report a bug': None,
+        'About': None
+    }
 )
 
-# Globals & Fallbacks
+# ===================== DYNAMIC THEME SYSTEM (7 THEMES) =====================
+THEMES = {
+    "Dark Mode": {
+        "base": "dark",
+        "primary": "#E50914",
+        "bg": "#0E1117",
+        "secondary_bg": "#161B22",
+        "text": "#F0F6FC",
+        "text_secondary": "#8B949E",
+        "border": "#30363D",
+        "card_bg": "#161B22",
+        "hover_bg": "#21262D"
+    },
+    "Light Mode": {
+        "base": "light",
+        "primary": "#0052CC",
+        "bg": "#F8FAFC",
+        "secondary_bg": "#F1F5F9",
+        "text": "#0F172A",
+        "text_secondary": "#475569",
+        "border": "#E2E8F0",
+        "card_bg": "#FFFFFF",
+        "hover_bg": "#EFF6FF"
+    },
+    "Racing Red": {
+        "base": "dark",
+        "primary": "#FF1E27",
+        "bg": "#0B0C10",
+        "secondary_bg": "#13141A",
+        "text": "#FFFFFF",
+        "text_secondary": "#A1A1A6",
+        "border": "#3D1B20",
+        "card_bg": "#16181F",
+        "hover_bg": "#28161A"
+    },
+    "Matcha Forest": {
+        "base": "light",
+        "primary": "#1B5E20",
+        "bg": "#EDF3EB",
+        "secondary_bg": "#E2ECE0",
+        "text": "#112210",
+        "text_secondary": "#2D4A2A",
+        "border": "#B8CCB4",
+        "card_bg": "#FFFFFF",
+        "hover_bg": "#E1EFE0"
+    },
+    "Cyberpunk Neon": {
+        "base": "dark",
+        "primary": "#00F0FF",
+        "bg": "#090A15",
+        "secondary_bg": "#0F1222",
+        "text": "#F0F4FF",
+        "text_secondary": "#8E9BB5",
+        "border": "#2E2A54",
+        "card_bg": "#14172B",
+        "hover_bg": "#1D203D"
+    },
+    "Monaco Luxury": {
+        "base": "dark",
+        "primary": "#E5C07B",
+        "bg": "#0B132B",
+        "secondary_bg": "#101733",
+        "text": "#F8F9FA",
+        "text_secondary": "#A0AAB8",
+        "border": "#3A4B75",
+        "card_bg": "#16203D",
+        "hover_bg": "#1E2B58"
+    },
+    "Nordic Frost": {
+        "base": "light",
+        "primary": "#0369A1",
+        "bg": "#F1F5F9",
+        "secondary_bg": "#E2E8F0",
+        "text": "#0F172A",
+        "text_secondary": "#334155",
+        "border": "#CBD5E1",
+        "card_bg": "#FFFFFF",
+        "hover_bg": "#E0F2FE"
+    }
+}
+
+if "app_theme" not in st.session_state:
+    st.session_state["app_theme"] = "Dark Mode"
+
+active_theme_name = st.session_state["app_theme"]
+th = THEMES.get(active_theme_name, THEMES["Dark Mode"])
+
+# Inject Dynamic Theme CSS + Hide Developer Tools
+st.markdown(f"""
+    <style>
+    /* Developer UI Cleanup */
+    #MainMenu {{visibility: hidden; display: none;}}
+    footer {{visibility: hidden; display: none;}}
+    header {{visibility: hidden; display: none;}}
+    [data-testid="stToolbar"] {{visibility: hidden; display: none;}}
+    [data-testid="stDecoration"] {{visibility: hidden; display: none;}}
+    [data-testid="stStatusWidget"] {{visibility: hidden; display: none;}}
+    .viewerBadge_container__1QSob {{display: none;}}
+
+    /* Global Dynamic Theme Variables */
+    :root, .stApp, [data-testid="stAppViewContainer"] {{
+        --primary-color: {th['primary']} !important;
+        --background-color: {th['bg']} !important;
+        --secondary-background-color: {th['secondary_bg']} !important;
+        --text-color: {th['text']} !important;
+    }}
+
+    /* Global Dynamic Theme Palette */
+    .stApp, [data-testid="stAppViewContainer"], section.main {{
+        background-color: {th['bg']} !important;
+        color: {th['text']} !important;
+    }}
+    [data-testid="stHeader"] {{
+        background-color: {th['bg']} !important;
+    }}
+    [data-testid="stSidebar"], [data-testid="stSidebar"] > div:first-child {{
+        background-color: {th['secondary_bg']} !important;
+        border-right: 1px solid {th['border']} !important;
+    }}
+
+    /* Containers & Card Borders */
+    [data-testid="stVerticalBlockBorderWrapper"] > div {{
+        background-color: {th['card_bg']} !important;
+        border: 1px solid {th['border']} !important;
+        border-radius: 8px !important;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05) !important;
+    }}
+    div[data-testid="stExpander"] {{
+        background-color: {th['card_bg']} !important;
+        border: 1px solid {th['border']} !important;
+        border-radius: 8px !important;
+    }}
+    div[data-testid="stExpander"] summary {{
+        color: {th['text']} !important;
+    }}
+    div[data-testid="stExpander"] summary * {{
+        color: {th['text']} !important;
+    }}
+    div[data-testid="stExpander"] summary svg {{
+        fill: {th['text']} !important;
+        stroke: {th['text']} !important;
+    }}
+
+    /* Global Typography - Headings, Paragraphs, Markdown */
+    h1, h2, h3, h4, h5, h6,
+    .stMarkdown, .stMarkdown p, .stMarkdown span, .stMarkdown li, .stMarkdown strong,
+    [data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] span, [data-testid="stMarkdownContainer"] li,
+    label, [data-testid="stWidgetLabel"], [data-testid="stWidgetLabel"] * {{
+        color: {th['text']} !important;
+    }}
+
+    /* Captions and Subtext with High Contrast */
+    [data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] *, .stCaption, small {{
+        color: {th.get('text_secondary', th['text'])} !important;
+        opacity: 0.9 !important;
+    }}
+
+    /* Primary Accent Buttons */
+    button[kind="primary"] {{
+        background-color: {th['primary']} !important;
+        border-color: {th['primary']} !important;
+    }}
+    button[kind="primary"] * {{
+        color: #FFFFFF !important;
+        font-weight: 600 !important;
+    }}
+
+    /* Secondary Accent Buttons */
+    button[kind="secondary"] {{
+        background-color: {th['card_bg']} !important;
+        border: 1px solid {th['border']} !important;
+    }}
+    button[kind="secondary"] * {{
+        color: {th['text']} !important;
+        font-weight: 600 !important;
+    }}
+
+    /* Automotive Metrics */
+    [data-testid="stMetricValue"], [data-testid="stMetricValue"] * {{
+        color: {th['primary']} !important;
+        font-weight: 700 !important;
+    }}
+    [data-testid="stMetricLabel"], [data-testid="stMetricLabel"] * {{
+        color: {th['text']} !important;
+        opacity: 0.9 !important;
+        font-weight: 600 !important;
+    }}
+
+    /* Tabs Styling */
+    [data-testid="stTabs"] button[role="tab"][aria-selected="true"] {{
+        color: {th['primary']} !important;
+        border-bottom: 3px solid {th['primary']} !important;
+        font-weight: 700 !important;
+    }}
+    [data-testid="stTabs"] button[role="tab"][aria-selected="true"] * {{
+        color: {th['primary']} !important;
+        font-weight: 700 !important;
+    }}
+    [data-testid="stTabs"] button[role="tab"] {{
+        color: {th['text']} !important;
+    }}
+    [data-testid="stTabs"] button[role="tab"] * {{
+        color: {th['text']} !important;
+    }}
+
+    /* Selectboxes and Dropdowns - The Box Itself */
+    div[data-baseweb="select"],
+    div[data-baseweb="select"] > div {{
+        background-color: {th['card_bg']} !important;
+        border-color: {th['border']} !important;
+        color: {th['text']} !important;
+    }}
+    div[data-baseweb="select"] * {{
+        color: {th['text']} !important;
+    }}
+    div[data-baseweb="select"] svg {{
+        fill: {th['text']} !important;
+    }}
+
+    /* Dropdown Menus and Popovers (Portalled to document body) */
+    div[data-baseweb="popover"],
+    div[data-baseweb="popover"] > div,
+    ul[role="listbox"],
+    div[data-baseweb="menu"] {{
+        background-color: {th['card_bg']} !important;
+        border: 1px solid {th['border']} !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+    }}
+    li[role="option"] {{
+        background-color: {th['card_bg']} !important;
+        color: {th['text']} !important;
+    }}
+    li[role="option"] * {{
+        color: {th['text']} !important;
+        background-color: transparent !important;
+    }}
+    li[role="option"]:hover,
+    li[role="option"]:hover *,
+    li[role="option"][aria-selected="true"],
+    li[role="option"][aria-selected="true"] * {{
+        background-color: {th.get('hover_bg', th['border'])} !important;
+        color: {th['text']} !important;
+    }}
+
+    /* Inputs (Text, Password, Number, Textarea) */
+    input, textarea,
+    input[type="text"], input[type="password"], input[type="number"],
+    div[data-baseweb="input"], div[data-baseweb="base-input"] {{
+        background-color: {th['card_bg']} !important;
+        color: {th['text']} !important;
+        border-color: {th['border']} !important;
+    }}
+    div[data-baseweb="input"] input {{
+        color: {th['text']} !important;
+        background-color: transparent !important;
+    }}
+    input::placeholder, textarea::placeholder {{
+        color: {th.get('text_secondary', th['text'])} !important;
+        opacity: 0.65 !important;
+    }}
+
+    /* Radio Buttons & Checkboxes */
+    div[data-testid="stRadio"] *,
+    div[data-testid="stCheckbox"] * {{
+        color: {th['text']} !important;
+    }}
+
+    /* Sliders */
+    div[data-testid="stSlider"] * {{
+        color: {th['text']} !important;
+    }}
+
+    /* Tables & Dataframes */
+    [data-testid="stDataFrame"], [data-testid="stTable"], table {{
+        background-color: {th['card_bg']} !important;
+        color: {th['text']} !important;
+        border: 1px solid {th['border']} !important;
+    }}
+    th, td {{
+        color: {th['text']} !important;
+    }}
+
+    /* Dividers */
+    hr {{
+        border-color: {th['border']} !important;
+    }}
+    </style>
+""", unsafe_allow_html=True)
+
+# Globals & Credentials
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "Verstappen@1")
 DB_PASSWORD = os.getenv("MYSQL_PASSWORD", "Arnav@1909")
 
 def get_db_config():
-    """
-    Retrieves database connection configuration.
-    Priority order:
-    1. Streamlit secrets (`st.secrets['mysql']` or `st.secrets`)
-    2. Environment variables (`MYSQL_HOST`, `MYSQL_USER`, `MYSQL_PASSWORD`, etc.)
-    3. Localhost fallback (`localhost`, user: root, database: AutoSpec_Database_System)
-    """
-    # 1. Streamlit Secrets (for Streamlit Community Cloud)
+    """Retrieves database configuration from secrets, environment, or localhost."""
     try:
         if hasattr(st, "secrets") and "mysql" in st.secrets:
             sec = st.secrets["mysql"]
@@ -44,11 +338,10 @@ def get_db_config():
                 cfg["ssl_disabled"] = bool(sec["ssl_disabled"])
             if "ssl_verify_cert" in sec:
                 cfg["ssl_verify_cert"] = bool(sec["ssl_verify_cert"])
-            return cfg, "Streamlit Secrets (Cloud)"
+            return cfg, "Cloud Secrets"
     except Exception:
         pass
 
-    # 2. Environment Variables
     if os.getenv("MYSQL_HOST"):
         cfg = {
             "host": os.getenv("MYSQL_HOST", "localhost"),
@@ -61,7 +354,6 @@ def get_db_config():
             cfg["ssl_ca"] = os.getenv("MYSQL_SSL_CA")
         return cfg, "Environment Variables"
 
-    # 3. Default fallback to local MySQL server
     return {
         "host": "localhost",
         "port": 3306,
@@ -71,7 +363,7 @@ def get_db_config():
     }, "Localhost Server"
 
 def get_db_connection(cfg=None):
-    """Establishes and returns a database connection with auto-retry and schema auto-creation."""
+    """Establishes database connection with automatic reconnection handling."""
     if cfg is None:
         cfg, _ = get_db_config()
     try:
@@ -90,7 +382,7 @@ def get_db_connection(cfg=None):
             return None
 
 def create_database(cfg=None):
-    """Creates the database and tables if they don't exist on the target server."""
+    """Initializes database schema if not present on server."""
     if cfg is None:
         cfg, _ = get_db_config()
     db_name = cfg.get("database", "AutoSpec_Database_System")
@@ -109,7 +401,6 @@ def create_database(cfg=None):
             return
 
     try:
-        # Create Tables
         temp_cursor.execute("""
             CREATE TABLE IF NOT EXISTS brands (
                 brand_id INT AUTO_INCREMENT PRIMARY KEY, brand_name VARCHAR(50) UNIQUE NOT NULL,
@@ -160,215 +451,45 @@ def create_database(cfg=None):
         st.error(f"Error creating database tables: {e}")
 
 def generate_sql_dump(cur):
-    """Generates a complete SQL dump (schema + data) for instant cloud migration."""
+    """Generates an explicit SQL dump for database backup and migration."""
     dump_lines = [
-        "-- ========================================================",
         "-- AutoSpec Database Full Export",
-        f"-- Export Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"-- Export Timestamp: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
         "-- Database: AutoSpec_Database_System",
-        "-- Target Compatibility: TiDB Cloud, AWS RDS, Supabase, MySQL 8+",
-        "-- ========================================================\n",
+        "SET FOREIGN_KEY_CHECKS=0;",
         "CREATE DATABASE IF NOT EXISTS `AutoSpec_Database_System`;",
-        "USE `AutoSpec_Database_System`;\n"
+        "USE `AutoSpec_Database_System`;"
     ]
-
-    tables = ["brands", "models", "variants", "features", "colors", "bookings"]
+    tables = ['brands', 'models', 'variants', 'features', 'colors', 'bookings']
     for tbl in tables:
         try:
             cur.execute(f"SHOW CREATE TABLE `{tbl}`")
-            row = cur.fetchone()
-            if row:
-                create_stmt = row[1]
-                dump_lines.append(f"-- --------------------------------------------------------")
-                dump_lines.append(f"-- Table structure for `{tbl}`")
-                dump_lines.append(f"-- --------------------------------------------------------")
-                dump_lines.append(f"DROP TABLE IF EXISTS `{tbl}`;")
-                dump_lines.append(f"{create_stmt};\n")
-
-                cur.execute(f"SELECT * FROM `{tbl}`")
-                rows = cur.fetchall()
-                if rows:
-                    col_names = [desc[0] for desc in cur.description]
-                    cols_joined = ", ".join([f"`{c}`" for c in col_names])
-                    dump_lines.append(f"-- Dumping data for table `{tbl}` ({len(rows)} records)")
-                    batch_vals = []
-                    for r in rows:
-                        formatted = []
-                        for v in r:
-                            if v is None:
-                                formatted.append("NULL")
-                            elif isinstance(v, (int, float)):
-                                formatted.append(str(v))
-                            else:
-                                escaped = str(v).replace("\\", "\\\\").replace("'", "\\'")
-                                formatted.append(f"'{escaped}'")
-                        batch_vals.append(f"({', '.join(formatted)})")
-                    dump_lines.append(f"INSERT INTO `{tbl}` ({cols_joined}) VALUES\n" + ",\n".join(batch_vals) + ";\n")
+            create_stmt = cur.fetchone()[1]
+            dump_lines.append(f"\nDROP TABLE IF EXISTS `{tbl}`;")
+            dump_lines.append(f"{create_stmt};")
+            cur.execute(f"SELECT * FROM `{tbl}`")
+            rows = cur.fetchall()
+            if rows:
+                col_names = [desc[0] for desc in cur.description]
+                col_list = ", ".join([f"`{c}`" for c in col_names])
+                dump_lines.append(f"INSERT INTO `{tbl}` ({col_list}) VALUES")
+                val_lines = []
+                for row in rows:
+                    row_vals = []
+                    for v in row:
+                        if v is None:
+                            row_vals.append("NULL")
+                        elif isinstance(v, (int, float)):
+                            row_vals.append(str(v))
+                        else:
+                            clean_v = str(v).replace("'", "\\'")
+                            row_vals.append(f"'{clean_v}'")
+                    val_lines.append(f"  ({', '.join(row_vals)})")
+                dump_lines.append(",\n".join(val_lines) + ";")
         except Exception:
             pass
-
+    dump_lines.append("\nSET FOREIGN_KEY_CHECKS=1;\n")
     return "\n".join(dump_lines)
-
-def inject_custom_css():
-    """Injects high-end luxury dark automotive theme CSS."""
-    st.markdown("""
-        <style>
-        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap');
-
-        html, body, [class*="css"] {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-        }
-
-        h1, h2, h3, h4, h5, h6 {
-            font-family: 'Outfit', sans-serif !important;
-            letter-spacing: -0.01em;
-        }
-
-        /* Top Hero Banner */
-        .hero-banner {
-            background: linear-gradient(135deg, rgba(230, 57, 70, 0.18) 0%, rgba(22, 27, 34, 0.95) 45%, rgba(13, 17, 23, 1) 100%);
-            border: 1px solid rgba(230, 57, 70, 0.35);
-            border-radius: 16px;
-            padding: 24px 28px;
-            margin-bottom: 24px;
-            box-shadow: 0 12px 36px -10px rgba(230, 57, 70, 0.25), 0 4px 16px rgba(0, 0, 0, 0.7);
-        }
-        .hero-title {
-            font-size: 2.1rem;
-            font-weight: 800;
-            background: linear-gradient(90deg, #FFFFFF 0%, #F1FAEE 50%, #E63946 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            margin: 0;
-            line-height: 1.2;
-        }
-        .hero-subtitle {
-            color: #8B949E;
-            font-size: 0.95rem;
-            margin-top: 6px;
-            margin-bottom: 0;
-            letter-spacing: 0.02em;
-        }
-
-        /* Performance Metric Cards */
-        .metric-card {
-            background: linear-gradient(145deg, #161B22 0%, #0E1218 100%);
-            border: 1px solid rgba(255, 255, 255, 0.07);
-            border-left: 4px solid #E63946;
-            border-radius: 12px;
-            padding: 16px 18px;
-            box-shadow: 0 4px 14px rgba(0,0,0,0.3);
-            transition: all 0.25s ease;
-            height: 100%;
-        }
-        .metric-card:hover {
-            transform: translateY(-2px);
-            border-color: rgba(230, 57, 70, 0.45);
-            box-shadow: 0 8px 24px rgba(230, 57, 70, 0.2);
-        }
-        .metric-label {
-            font-size: 0.75rem;
-            color: #8B949E;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            font-weight: 700;
-            margin-bottom: 4px;
-        }
-        .metric-value {
-            font-size: 1.55rem;
-            color: #F0F6FC;
-            font-weight: 700;
-            font-family: 'Outfit', sans-serif;
-            margin: 0;
-        }
-        .metric-sub {
-            font-size: 0.75rem;
-            color: #58A6FF;
-            margin-top: 4px;
-        }
-
-        /* Specification Badges */
-        .badge-pill {
-            display: inline-block;
-            background: rgba(230, 57, 70, 0.12);
-            color: #FF7B72;
-            border: 1px solid rgba(230, 57, 70, 0.28);
-            border-radius: 20px;
-            padding: 4px 12px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            margin: 3px 4px 3px 0;
-        }
-        .color-pill {
-            display: inline-block;
-            background: #21262D;
-            color: #C9D1D9;
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 16px;
-            padding: 4px 12px;
-            font-size: 0.8rem;
-            font-weight: 500;
-            margin: 3px 4px;
-        }
-
-        /* VIP Booking Voucher */
-        .voucher-card {
-            background: linear-gradient(135deg, #1C212E 0%, #0F141C 100%);
-            border: 2px solid #E63946;
-            border-radius: 16px;
-            padding: 24px 28px;
-            box-shadow: 0 16px 48px rgba(230, 57, 70, 0.22);
-            margin-top: 20px;
-        }
-        .voucher-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px dashed rgba(255, 255, 255, 0.18);
-            padding-bottom: 14px;
-            margin-bottom: 18px;
-        }
-        .voucher-id {
-            font-family: 'Outfit', monospace;
-            font-size: 1.55rem;
-            font-weight: 800;
-            color: #E63946;
-            letter-spacing: 0.05em;
-        }
-
-        /* Database Connection Pill in Sidebar */
-        .db-status-pill {
-            display: flex;
-            align-items: center;
-            background: rgba(46, 160, 67, 0.12);
-            border: 1px solid rgba(46, 160, 67, 0.35);
-            border-radius: 8px;
-            padding: 8px 12px;
-            color: #3FB950;
-            font-size: 0.85rem;
-            font-weight: 600;
-            margin-bottom: 12px;
-        }
-        .status-dot {
-            height: 9px;
-            width: 9px;
-            background-color: #3FB950;
-            border-radius: 50%;
-            display: inline-block;
-            margin-right: 8px;
-            box-shadow: 0 0 8px #3FB950;
-        }
-
-        /* Price Tag */
-        .price-badge {
-            font-size: 1.85rem;
-            font-weight: 800;
-            color: #E63946;
-            font-family: 'Outfit', sans-serif;
-            margin: 4px 0 16px 0;
-        }
-        </style>
-    """, unsafe_allow_html=True)
 
 def insert_sample_data(cur, conn):
     print("✓ Inserting data (if not present)...")
@@ -539,20 +660,30 @@ def insert_sample_data(cur, conn):
         ('Lamborghini', 'Urus', 'SUV', 'Super SUV'),
         ('Lamborghini', 'Revuelto', 'Coupé', 'HPEV V12 Flagship Supercar')
     ]
+    # Strict Foreign Key Crosscheck: Verify Brand exists before inserting Model
+    cur.execute("SELECT brand_id, brand_name FROM brands")
+    valid_brands = {b[1]: b[0] for b in cur.fetchall()}
+
     for m in models:
+        brand_name, model_name, body_type, category = m[0], m[1], m[2], m[3]
+        if brand_name not in valid_brands:
+            print(f"[DATA INTEGRITY WARNING] Model skipped: Brand '{brand_name}' does not exist in database for Model '{model_name}'.")
+            continue
+
+        brand_id = valid_brands[brand_name]
         try:
             cur.execute("""
-                SELECT model_id FROM models m
-                JOIN brands b ON m.brand_id = b.brand_id
-                WHERE b.brand_name = %s AND m.model_name = %s LIMIT 1
-            """, (m[0], m[1]))
+                SELECT model_id FROM models
+                WHERE brand_id = %s AND model_name = %s LIMIT 1
+            """, (brand_id, model_name))
             if not cur.fetchone():
                 cur.execute("""
                     INSERT INTO models (brand_id, model_name, body_type, category)
-                    VALUES ((SELECT brand_id FROM brands WHERE brand_name = %s LIMIT 1), %s, %s, %s)
-                """, m)
-        except Exception:
-            pass
+                    VALUES (%s, %s, %s, %s)
+                """, (brand_id, model_name, body_type, category))
+        except Exception as e:
+            if "Duplicate entry" not in str(e):
+                print(f"[DATA INTEGRITY ERROR] Error inserting model '{model_name}' for brand '{brand_name}': {e}")
     conn.commit()
     print("✓ All Models inserted successfully!")
     
@@ -731,30 +862,179 @@ def insert_sample_data(cur, conn):
 
         # Lamborghini
         (('Lamborghini', 'Urus'), 'Performante', '42200000', '4.0L Twin-Turbo V8 Petrol', 657, 850, 306, 3.3, 'Automatic (TC) - 8 Gears, Paddle Shift', 'All-Wheel Drive', 'Petrol', '7.1 km/l', 5, 'Not Tested'),
-        (('Lamborghini', 'Revuelto'), 'Coupe', '88900000', '6.5L Naturally Aspirated V12 + 3 Electric Motors (HPEV)', 1001, 1062, 350, 2.5, 'Automatic (DCT) - 8 Gears, Paddle Shift', 'All-Wheel Drive', 'Plug-in Hybrid (Electric + Petrol)', '8.4 km/l', 2, 'Not Tested')
+        (('Lamborghini', 'Revuelto'), 'Coupe', '88900000', '6.5L Naturally Aspirated V12 + 3 Electric Motors (HPEV)', 1001, 1062, 350, 2.5, 'Automatic (DCT) - 8 Gears, Paddle Shift', 'All-Wheel Drive', 'Plug-in Hybrid (Electric + Petrol)', '8.4 km/l', 2, 'Not Tested'),
+        # --- Additional 146 Real-World Production Variants ---
+        (('Ford', 'Endeavour'), 'Titanium 4x2 AT', '3350000', '2.0L EcoBlue Turbo Diesel', 168, 420, 180, 10.8, 'Automatic (TC) - 10 Gears', 'Rear Wheel Drive', 'Diesel', '13.2 km/l', 7, '5 Star (ANCAP)'),
+        (('Ford', 'Endeavour'), 'Sport Edition 4x4 AT', '3780000', '2.0L EcoBlue Bi-Turbo Diesel', 168, 420, 180, 10.1, 'Automatic (TC) - 10 Gears, Terrain Management', 'Four-Wheel Drive', 'Diesel', '12.4 km/l', 7, '5 Star (ANCAP)'),
+        (('Ford', 'Mustang'), 'EcoBoost 2.3L Fastback', '5500000', '2.3L EcoBoost Twin-Scroll Turbocharged Petrol', 310, 475, 240, 5.1, 'Automatic (TC) - 10 Gears, Paddle Shift', 'Rear Wheel Drive', 'Petrol', '10.5 km/l', 4, '4 Star (Euro NCAP)'),
+        (('Ford', 'Mustang'), 'Mach 1 V8', '8400000', '5.0L Ti-VCT V8 Naturally Aspirated Petrol', 480, 569, 267, 4.2, 'Automatic (TC) - 10 Gears, Rev-Matching', 'Rear Wheel Drive', 'Petrol', '7.2 km/l', 4, '3 Star (Euro NCAP)'),
+        (('Mahindra', 'XUV700'), 'AX5 Petrol MT 5-Str', '1689000', '2.0L mStallion Turbo GDi Petrol', 197, 380, 195, 9.4, 'Manual - 6 Gears', 'Front Wheel Drive', 'Petrol', '13.0 km/l', 5, '5 Star (Global NCAP)'),
+        (('Mahindra', 'XUV700'), 'AX7 Petrol AT 7-Str', '2199000', '2.0L mStallion Turbo GDi Petrol', 197, 380, 200, 9.1, 'Automatic (TC) - 6 Gears', 'Front Wheel Drive', 'Petrol', '12.5 km/l', 7, '5 Star (Global NCAP)'),
+        (('Mahindra', 'XUV700'), 'AX7L Diesel AT AWD 7-Str', '2649000', '2.2L mHawk Turbo Diesel', 182, 450, 200, 9.8, 'Automatic (TC) - 6 Gears', 'All-Wheel Drive', 'Diesel', '16.5 km/l', 7, '5 Star (Global NCAP)'),
+        (('Mahindra', 'Scorpio-N'), 'Z4 Diesel MT 7-Str', '1590000', '2.2L mHawk CRDe Turbo Diesel', 172, 370, 175, 11.2, 'Manual - 6 Gears', 'Rear Wheel Drive', 'Diesel', '16.0 km/l', 7, '5 Star (Global NCAP)'),
+        (('Mahindra', 'Scorpio-N'), 'Z8 Petrol AT 7-Str', '2115000', '2.0L mStallion Turbo GDi Petrol', 200, 380, 185, 9.5, 'Automatic (TC) - 6 Gears', 'Rear Wheel Drive', 'Petrol', '12.8 km/l', 7, '5 Star (Global NCAP)'),
+        (('Mahindra', 'Scorpio-N'), 'Z8 Select Diesel MT 7-Str', '1799000', '2.2L mHawk CRDe Turbo Diesel', 172, 370, 175, 11.0, 'Manual - 6 Gears', 'Rear Wheel Drive', 'Diesel', '15.8 km/l', 7, '5 Star (Global NCAP)'),
+        (('Mahindra', 'Thar'), 'AX Opt 4-Str Diesel MT 4WD', '1485000', '2.2L mHawk 130 CRDe Turbo Diesel', 130, 300, 155, 13.0, 'Manual - 6 Gears, Shift-on-Fly Transfer Case', 'Four-Wheel Drive', 'Diesel', '15.2 km/l', 4, '4 Star (Global NCAP)'),
+        (('Mahindra', 'Thar'), 'Earth Edition Petrol AT 4WD', '1715000', '2.0L mStallion 150 TGDi Petrol', 150, 320, 160, 10.2, 'Automatic (TC) - 6 Gears', 'Four-Wheel Drive', 'Petrol', '12.0 km/l', 4, '4 Star (Global NCAP)'),
+        (('Mahindra', 'Thar'), 'Roxx AX7L 4x4 Diesel AT', '2249000', '2.2L mHawk Turbo Diesel Gen 2', 172, 400, 175, 10.1, 'Automatic (TC) - 6 Gears', 'Four-Wheel Drive', 'Diesel', '15.0 km/l', 5, '5 Star (Bharat NCAP)'),
+        (('Hyundai', 'Creta'), 'E 1.5 Petrol MT', '1099000', '1.5L Smartstream MPi Petrol', 113, 144, 165, 12.0, 'Manual - 6 Gears', 'Front Wheel Drive', 'Petrol', '17.4 km/l', 5, '3 Star (Global NCAP)'),
+        (('Hyundai', 'Creta'), 'EX 1.5 Diesel MT', '1379000', '1.5L U2 CRDi Turbo Diesel', 114, 250, 170, 11.8, 'Manual - 6 Gears', 'Front Wheel Drive', 'Diesel', '21.8 km/l', 5, '3 Star (Global NCAP)'),
+        (('Hyundai', 'Creta'), 'SX Tech 1.5 Petrol IVT', '1748000', '1.5L Smartstream MPi Petrol', 113, 144, 165, 11.6, 'Automatic (IVT / CVT)', 'Front Wheel Drive', 'Petrol', '17.7 km/l', 5, '3 Star (Global NCAP)'),
+        (('Hyundai', 'Creta'), 'N Line N8 1.5 Turbo DCT', '1834000', '1.5L Kappa Turbo GDi Petrol', 158, 253, 195, 8.9, 'Automatic (DCT) - 7 Gears, Paddle Shift', 'Front Wheel Drive', 'Petrol', '18.4 km/l', 5, '3 Star (Global NCAP)'),
+        (('Hyundai', 'Venue'), 'S Plus 1.2 Petrol MT', '935000', '1.2L Kappa MPi Petrol', 82, 114, 155, 13.8, 'Manual - 5 Gears', 'Front Wheel Drive', 'Petrol', '17.5 km/l', 5, '4 Star (ANCAP)'),
+        (('Hyundai', 'Venue'), 'N Line N8 1.0 Turbo DCT', '1390000', '1.0L Turbo GDi Petrol', 118, 172, 175, 10.4, 'Automatic (DCT) - 7 Gears, Paddle Shift', 'Front Wheel Drive', 'Petrol', '18.3 km/l', 5, '4 Star (ANCAP)'),
+        (('Hyundai', 'Verna'), 'S 1.5 MPi MT', '1199000', '1.5L Smartstream MPi Petrol', 113, 144, 185, 10.9, 'Manual - 6 Gears', 'Front Wheel Drive', 'Petrol', '18.6 km/l', 5, '5 Star (Global NCAP)'),
+        (('Hyundai', 'Verna'), 'SX 1.5 MPi IVT', '1435000', '1.5L Smartstream MPi Petrol', 113, 144, 185, 10.7, 'Automatic (IVT / CVT), Paddle Shift', 'Front Wheel Drive', 'Petrol', '19.6 km/l', 5, '5 Star (Global NCAP)'),
+        (('Hyundai', 'Bayon'), '1.0 T-GDi DCT', '1150000', '1.0L Turbocharged 3-Cylinder GDi Petrol', 118, 172, 185, 10.2, 'Automatic (DCT) - 7 Gears', 'Front Wheel Drive', 'Petrol', '18.8 km/l', 5, '4 Star (Euro NCAP)'),
+        (('Honda', 'City'), 'V MT', '1208000', '1.5L i-VTEC DOHC Petrol with VTC', 119, 145, 185, 10.2, 'Manual - 6 Gears', 'Front Wheel Drive', 'Petrol', '17.8 km/l', 5, '5 Star (ASEAN NCAP)'),
+        (('Honda', 'City'), 'VX CVT', '1425000', '1.5L i-VTEC DOHC Petrol with VTC', 119, 145, 180, 10.6, 'Automatic (CVT) - 7-Speed Paddle Shift', 'Front Wheel Drive', 'Petrol', '18.4 km/l', 5, '5 Star (ASEAN NCAP)'),
+        (('Honda', 'City'), 'e:HEV Hybrid ZX', '2055000', '1.5L Atkinson Cycle Petrol + Dual Electric Motor', 125, 253, 175, 9.8, 'Automatic (e-CVT)', 'Front Wheel Drive', 'Hybrid (Electric + Petrol)', '27.13 km/l', 5, '5 Star (ASEAN NCAP)'),
+        (('Honda', 'Elevate'), 'V MT', '1211000', '1.5L i-VTEC DOHC Petrol', 119, 145, 170, 11.5, 'Manual - 6 Gears', 'Front Wheel Drive', 'Petrol', '15.3 km/l', 5, '5 Star (Bharat NCAP)'),
+        (('Honda', 'Elevate'), 'VX CVT', '1430000', '1.5L i-VTEC DOHC Petrol', 119, 145, 170, 11.2, 'Automatic (CVT) - 7-Speed Paddle Shift', 'Front Wheel Drive', 'Petrol', '16.9 km/l', 5, '5 Star (Bharat NCAP)'),
+        (('Honda', 'Elevate'), 'Apex Edition ZX CVT', '1650000', '1.5L i-VTEC DOHC Petrol', 119, 145, 170, 11.2, 'Automatic (CVT) - 7-Speed Paddle Shift', 'Front Wheel Drive', 'Petrol', '16.9 km/l', 5, '5 Star (Bharat NCAP)'),
+        (('Maruti Suzuki', 'Swift'), 'LXi 1.2 MT', '649000', '1.2L Z12E 3-Cylinder Petrol', 80, 112, 160, 13.0, 'Manual - 5 Gears', 'Front Wheel Drive', 'Petrol', '24.8 km/l', 5, '4 Star (Euro NCAP)'),
+        (('Maruti Suzuki', 'Swift'), 'VXi 1.2 AMT', '780000', '1.2L Z12E 3-Cylinder Petrol', 80, 112, 160, 12.8, 'Automatic (AMT) - 5 Gears', 'Front Wheel Drive', 'Petrol', '25.75 km/l', 5, '4 Star (Euro NCAP)'),
+        (('Maruti Suzuki', 'Swift'), 'ZXi 1.2 MT', '830000', '1.2L Z12E 3-Cylinder Petrol', 80, 112, 160, 12.5, 'Manual - 5 Gears', 'Front Wheel Drive', 'Petrol', '24.8 km/l', 5, '4 Star (Euro NCAP)'),
+        (('Maruti Suzuki', 'Brezza'), 'LXi 1.5 MT', '834000', '1.5L K15C Smart Hybrid Petrol', 102, 137, 165, 13.2, 'Manual - 5 Gears', 'Front Wheel Drive', 'Petrol', '19.89 km/l', 5, '4 Star (Global NCAP)'),
+        (('Maruti Suzuki', 'Brezza'), 'VXi 1.5 AT', '1110000', '1.5L K15C Smart Hybrid Petrol', 102, 137, 165, 12.9, 'Automatic (TC) - 6 Gears, Paddle Shift', 'Front Wheel Drive', 'Petrol', '19.8 km/l', 5, '4 Star (Global NCAP)'),
+        (('Maruti Suzuki', 'Brezza'), 'ZXi 1.5 MT', '1115000', '1.5L K15C Smart Hybrid Petrol', 102, 137, 165, 12.6, 'Manual - 5 Gears', 'Front Wheel Drive', 'Petrol', '19.89 km/l', 5, '4 Star (Global NCAP)'),
+        (('Maruti Suzuki', 'Grand Vitara'), 'Delta 1.5 AT', '1360000', '1.5L K15C Mild Hybrid Petrol', 102, 137, 170, 12.4, 'Automatic (TC) - 6 Gears, Paddle Shift', 'Front Wheel Drive', 'Petrol', '20.58 km/l', 5, '5 Star (Bharat NCAP)'),
+        (('Maruti Suzuki', 'Grand Vitara'), 'Zeta+ Strong Hybrid e-CVT', '1843000', '1.5L Strong Hybrid + Li-ion Battery', 114, 141, 175, 11.1, 'Automatic (e-CVT)', 'Front Wheel Drive', 'Hybrid (Electric + Petrol)', '27.97 km/l', 5, '5 Star (Bharat NCAP)'),
+        (('Maruti Suzuki', 'Grand Vitara'), 'Alpha AllGrip AWD MT', '1701000', '1.5L K15C Mild Hybrid Petrol', 102, 137, 168, 12.9, 'Manual - 5 Gears, AllGrip Auto Mode', 'All-Wheel Drive', 'Petrol', '19.38 km/l', 5, '5 Star (Bharat NCAP)'),
+        (('Tata Motors', 'Nexon'), 'Smart 1.2 Petrol MT', '799000', '1.2L Revotron Turbocharged Petrol', 118, 170, 165, 11.5, 'Manual - 5 Gears', 'Front Wheel Drive', 'Petrol', '17.44 km/l', 5, '5 Star (Global NCAP)'),
+        (('Tata Motors', 'Nexon'), 'Pure S 1.2 Petrol AMT', '1030000', '1.2L Revotron Turbocharged Petrol', 118, 170, 168, 11.2, 'Automatic (AMT) - 6 Gears', 'Front Wheel Drive', 'Petrol', '17.18 km/l', 5, '5 Star (Global NCAP)'),
+        (('Tata Motors', 'Nexon'), 'Creative+ 1.5 Diesel AMT', '1370000', '1.5L Revotorq Turbo Diesel', 113, 260, 170, 11.4, 'Automatic (AMT) - 6 Gears', 'Front Wheel Drive', 'Diesel', '23.23 km/l', 5, '5 Star (Global NCAP)'),
+        (('Tata Motors', 'Nexon'), 'EV Empowered Plus 45 kWh', '1699000', 'Permanent Magnet Synchronous Motor + 45 kWh Battery', 143, 215, 150, 8.9, 'Automatic - 1 Gears', 'Front Wheel Drive', 'Electric', '489 km', 5, '5 Star (Bharat NCAP)'),
+        (('Tata Motors', 'Harrier'), 'Smart MT', '1549000', '2.0L Kryotec Turbo Diesel', 168, 350, 180, 10.5, 'Manual - 6 Gears', 'Front Wheel Drive', 'Diesel', '16.8 km/l', 5, '5 Star (Bharat NCAP)'),
+        (('Tata Motors', 'Harrier'), 'Adventure+ A Dark AT', '2269000', '2.0L Kryotec Turbo Diesel', 168, 350, 180, 9.9, 'Automatic (TC) - 6 Gears, Paddle Shift', 'Front Wheel Drive', 'Diesel', '16.8 km/l', 5, '5 Star (Bharat NCAP)'),
+        (('Tata Motors', 'Harrier'), 'Fearless+ Stealth AT', '2644000', '2.0L Kryotec Turbo Diesel', 168, 350, 180, 9.9, 'Automatic (TC) - 6 Gears, Paddle Shift', 'Front Wheel Drive', 'Diesel', '16.8 km/l', 5, '5 Star (Bharat NCAP)'),
+        (('Tata Motors', 'Safari'), 'Pure+ MT 7-Str', '1799000', '2.0L Kryotec Turbo Diesel', 168, 350, 180, 10.6, 'Manual - 6 Gears', 'Front Wheel Drive', 'Diesel', '16.3 km/l', 7, '5 Star (Bharat NCAP)'),
+        (('Tata Motors', 'Safari'), 'Adventure+ Dark AT 7-Str', '2349000', '2.0L Kryotec Turbo Diesel', 168, 350, 180, 10.1, 'Automatic (TC) - 6 Gears, Paddle Shift', 'Front Wheel Drive', 'Diesel', '16.3 km/l', 7, '5 Star (Bharat NCAP)'),
+        (('Tata Motors', 'Safari'), 'Accomplished 6-Str Captain Seats AT', '2699000', '2.0L Kryotec Turbo Diesel', 168, 350, 180, 10.1, 'Automatic (TC) - 6 Gears, Paddle Shift', 'Front Wheel Drive', 'Diesel', '16.3 km/l', 6, '5 Star (Bharat NCAP)'),
+        (('Tata Motors', 'Punch'), 'Pure MT', '613000', '1.2L Revotron Naturally Aspirated Petrol', 87, 115, 150, 14.1, 'Manual - 5 Gears', 'Front Wheel Drive', 'Petrol', '20.09 km/l', 5, '5 Star (Global NCAP)'),
+        (('Tata Motors', 'Punch'), 'Adventure Rhythm AMT', '785000', '1.2L Revotron Petrol', 87, 115, 150, 13.8, 'Automatic (AMT) - 5 Gears', 'Front Wheel Drive', 'Petrol', '18.8 km/l', 5, '5 Star (Global NCAP)'),
+        (('Tata Motors', 'Punch'), 'Accomplished Dazzle Sunroof AMT', '920000', '1.2L Revotron Petrol', 87, 115, 150, 13.5, 'Automatic (AMT) - 5 Gears', 'Front Wheel Drive', 'Petrol', '18.8 km/l', 5, '5 Star (Global NCAP)'),
+        (('Tata Motors', 'Punch'), 'EV Empowered Plus 35 kWh', '1429000', 'Permanent Magnet AC Motor + 35 kWh Battery', 120, 190, 140, 9.5, 'Automatic - 1 Gears', 'Front Wheel Drive', 'Electric', '421 km', 5, '5 Star (Bharat NCAP)'),
+        (('Tata Motors', 'Curvv'), 'Creative+ S 1.2 Hyperion Turbo DCA', '1619000', '1.2L Hyperion Direct Injection Turbo Petrol', 123, 225, 180, 9.7, 'Automatic (DCA) - 7 Gears, Paddle Shift', 'Front Wheel Drive', 'Petrol', '17.5 km/l', 5, '5 Star (Bharat NCAP)'),
+        (('Tata Motors', 'Curvv'), 'Accomplished+ 1.5 Diesel AT', '1900000', '1.5L Kryojet Turbocharged Diesel', 116, 260, 175, 11.2, 'Automatic (DCA) - 7 Gears, Paddle Shift', 'Front Wheel Drive', 'Diesel', '21.5 km/l', 5, '5 Star (Bharat NCAP)'),
+        (('Tata Motors', 'Curvv'), 'Curvv.ev Empowered+ 55 kWh', '2199000', 'PMSM Motor + 55 kWh Battery', 165, 215, 160, 8.6, 'Automatic - 1 Gears', 'Front Wheel Drive', 'Electric', '585 km', 5, '5 Star (Bharat NCAP)'),
+        (('Tata Motors', 'Sierra'), 'EV Adventure RWD', '2100000', 'Single PMSM Motor + 55 kWh Battery', 170, 280, 170, 7.8, 'Automatic - 1 Gears', 'Rear Wheel Drive', 'Electric', '480 km', 5, '5 Star (Bharat NCAP)'),
+        (('Kia', 'Seltos'), 'HTE 1.5 Petrol MT', '1090000', '1.5L Smartstream MPi Petrol', 113, 144, 170, 11.8, 'Manual - 6 Gears', 'Front Wheel Drive', 'Petrol', '17.0 km/l', 5, '3 Star (Global NCAP)'),
+        (('Kia', 'Seltos'), 'HTX 1.5 Turbo DCT', '1830000', '1.5L Smartstream Turbo GDi Petrol', 158, 253, 195, 8.9, 'Automatic (DCT) - 7 Gears, Paddle Shift', 'Front Wheel Drive', 'Petrol', '17.9 km/l', 5, '3 Star (Global NCAP)'),
+        (('Kia', 'Seltos'), 'GTX+ 1.5 Diesel AT', '2000000', '1.5L CRDi VGT Diesel', 114, 250, 175, 11.4, 'Automatic (TC) - 6 Gears, Paddle Shift', 'Front Wheel Drive', 'Diesel', '19.1 km/l', 5, '3 Star (Global NCAP)'),
+        (('Kia', 'Sonet'), 'HTE 1.2 Petrol MT', '799000', '1.2L Smartstream MPi Petrol', 82, 115, 155, 13.5, 'Manual - 5 Gears', 'Front Wheel Drive', 'Petrol', '18.83 km/l', 5, '3 Star (Global NCAP)'),
+        (('Kia', 'Sonet'), 'HTX 1.5 Diesel AT', '1310000', '1.5L CRDi VGT Diesel', 114, 250, 170, 11.0, 'Automatic (TC) - 6 Gears, Paddle Shift', 'Front Wheel Drive', 'Diesel', '19.0 km/l', 5, '3 Star (Global NCAP)'),
+        (('Kia', 'Sonet'), 'GTX+ 1.0 Turbo DCT', '1455000', '1.0L Smartstream Turbo GDi Petrol', 118, 172, 168, 10.7, 'Automatic (DCT) - 7 Gears, Paddle Shift', 'Front Wheel Drive', 'Petrol', '18.2 km/l', 5, '3 Star (Global NCAP)'),
+        (('Kia', 'EV6'), 'GT Performance AWD', '7000000', 'Dual PMSM Motor + 77.4 kWh Battery', 577, 740, 260, 3.5, 'Automatic - 1 Gears, Drift Mode', 'All-Wheel Drive', 'Electric', '546 km', 5, '5 Star (Euro NCAP)'),
+        (('Toyota', 'Fortuner'), '2.7 Petrol 4x2 MT', '3343000', '2.7L 2TR-FE 4-Cylinder Petrol Dual VVT-i', 164, 245, 175, 12.0, 'Manual - 5 Gears', 'Rear Wheel Drive', 'Petrol', '10.3 km/l', 7, '5 Star (ANCAP)'),
+        (('Toyota', 'Fortuner'), '2.8 Diesel 4x2 AT', '3821000', '2.8L 1GD-FTV Turbo Diesel', 201, 500, 180, 10.2, 'Automatic (TC) - 6 Gears, Paddle Shift', 'Rear Wheel Drive', 'Diesel', '14.4 km/l', 7, '5 Star (ANCAP)'),
+        (('Toyota', 'Fortuner'), 'Legender 2.8 4x4 AT', '4764000', '2.8L 1GD-FTV Turbocharged Diesel', 201, 500, 180, 9.8, 'Automatic (TC) - 6 Gears, Paddle Shift', 'Four-Wheel Drive', 'Diesel', '14.2 km/l', 7, '5 Star (ANCAP)'),
+        (('Toyota', 'Innova Hycross'), 'GX 2.0 Petrol AT 7-Str', '1977000', '2.0L TNGA 4-Cylinder M20A-FKS Petrol', 172, 209, 170, 10.5, 'Automatic (CVT)', 'Front Wheel Drive', 'Petrol', '16.13 km/l', 7, '5 Star (Bharat NCAP)'),
+        (('Toyota', 'Innova Hycross'), 'VX Hybrid 8-Str', '2597000', '2.0L TNGA 4-Cylinder Petrol Hybrid (e-Drive)', 184, 206, 170, 9.5, 'Automatic (e-CVT)', 'Front Wheel Drive', 'Hybrid (Electric + Petrol)', '23.24 km/l', 8, '5 Star (Bharat NCAP)'),
+        (('Toyota', 'Innova Hycross'), 'VX(O) Hybrid 7-Str', '2799000', '2.0L TNGA 4-Cylinder Petrol Hybrid (e-Drive)', 184, 206, 170, 9.5, 'Automatic (e-CVT)', 'Front Wheel Drive', 'Hybrid (Electric + Petrol)', '23.24 km/l', 7, '5 Star (Bharat NCAP)'),
+        (('Toyota', 'Urban Cruiser Hyryder'), 'S NeoDrive AT', '1388000', '1.5L K15C Mild Hybrid Petrol', 102, 137, 170, 12.5, 'Automatic (TC) - 6 Gears, Paddle Shift', 'Front Wheel Drive', 'Petrol', '20.58 km/l', 5, '5 Star (Bharat NCAP)'),
+        (('Toyota', 'Urban Cruiser Hyryder'), 'G Strong Hybrid e-CVT', '1869000', '1.5L TNGA 3-Cylinder Strong Hybrid', 114, 141, 170, 11.2, 'Automatic (e-CVT)', 'Front Wheel Drive', 'Hybrid (Electric + Petrol)', '27.97 km/l', 5, '5 Star (Bharat NCAP)'),
+        (('Toyota', 'Urban Cruiser Hyryder'), 'V AWD AllGrip MT', '1734000', '1.5L K15C Mild Hybrid Petrol', 102, 137, 168, 12.9, 'Manual - 5 Gears, AllGrip Select AWD', 'All-Wheel Drive', 'Petrol', '19.38 km/l', 5, '5 Star (Bharat NCAP)'),
+        (('MG Motor', 'Hector'), 'Shine Pro 1.5 MT', '1600000', '1.5L Turbocharged Petrol', 141, 250, 170, 11.8, 'Manual - 6 Gears', 'Front Wheel Drive', 'Petrol', '13.8 km/l', 5, '5 Star (ASEAN NCAP)'),
+        (('MG Motor', 'Hector'), 'Select Pro 2.0 Diesel MT', '1870000', '2.0L Multijet II Turbo Diesel', 168, 350, 180, 10.2, 'Manual - 6 Gears', 'Front Wheel Drive', 'Diesel', '15.6 km/l', 5, '5 Star (ASEAN NCAP)'),
+        (('MG Motor', 'Hector'), 'Savvy Pro Blackstorm CVT', '2250000', '1.5L Turbocharged Petrol', 141, 250, 170, 11.5, 'Automatic (CVT) - 8-Step Mode', 'Front Wheel Drive', 'Petrol', '13.8 km/l', 5, '5 Star (ASEAN NCAP)'),
+        (('MG Motor', 'ZS EV'), 'Excite Executive 50.3 kWh', '1898000', '50.3 kWh Prismatic Battery', 174, 280, 175, 8.5, 'Automatic - 1 Gears', 'Front Wheel Drive', 'Electric', '461 km', 5, '5 Star (Euro NCAP)'),
+        (('MG Motor', 'ZS EV'), 'Exclusive Plus 50.3 kWh', '2410000', '50.3 kWh Prismatic Battery', 174, 280, 175, 8.5, 'Automatic - 1 Gears', 'Front Wheel Drive', 'Electric', '461 km', 5, '5 Star (Euro NCAP)'),
+        (('Volkswagen', 'Virtus'), 'Comfortline 1.0 TSI MT', '1156000', '1.0L TSI 3-Cylinder Turbo Petrol', 114, 178, 190, 10.4, 'Manual - 6 Gears', 'Front Wheel Drive', 'Petrol', '20.8 km/l', 5, '5 Star (Global NCAP)'),
+        (('Volkswagen', 'Virtus'), 'Highline 1.0 TSI AT', '1488000', '1.0L TSI 3-Cylinder Turbo Petrol', 114, 178, 190, 10.9, 'Automatic (TC) - 6 Gears, Paddle Shift', 'Front Wheel Drive', 'Petrol', '18.45 km/l', 5, '5 Star (Global NCAP)'),
+        (('Volkswagen', 'Virtus'), 'Topline 1.0 TSI AT', '1668000', '1.0L TSI 3-Cylinder Turbo Petrol', 114, 178, 190, 10.9, 'Automatic (TC) - 6 Gears, Paddle Shift', 'Front Wheel Drive', 'Petrol', '18.45 km/l', 5, '5 Star (Global NCAP)'),
+        (('Volkswagen', 'Virtus'), 'GT Edge Limited Edition 1.5 DSG', '1940000', '1.5L TSI EVO Turbo Petrol with ACT', 148, 250, 190, 8.7, 'Automatic (DSG) - 7 Gears, Paddle Shift', 'Front Wheel Drive', 'Petrol', '19.62 km/l', 5, '5 Star (Global NCAP)'),
+        (('Volkswagen', 'Taigun'), 'Comfortline 1.0 TSI MT', '1170000', '1.0L TSI 3-Cylinder Turbo Petrol', 114, 178, 185, 10.6, 'Manual - 6 Gears', 'Front Wheel Drive', 'Petrol', '19.87 km/l', 5, '5 Star (Global NCAP)'),
+        (('Volkswagen', 'Taigun'), 'Highline 1.0 TSI AT', '1520000', '1.0L TSI 3-Cylinder Turbo Petrol', 114, 178, 185, 11.1, 'Automatic (TC) - 6 Gears, Paddle Shift', 'Front Wheel Drive', 'Petrol', '18.15 km/l', 5, '5 Star (Global NCAP)'),
+        (('Volkswagen', 'Taigun'), 'GT Plus Edge Chrome 1.5 DSG', '1970000', '1.5L TSI EVO Turbo Petrol with ACT', 148, 250, 185, 8.9, 'Automatic (DSG) - 7 Gears, Paddle Shift', 'Front Wheel Drive', 'Petrol', '18.41 km/l', 5, '5 Star (Global NCAP)'),
+        (('Skoda', 'Slavia'), 'Active 1.0 TSI MT', '1163000', '1.0L TSI 3-Cylinder Turbo Petrol', 114, 178, 190, 10.4, 'Manual - 6 Gears', 'Front Wheel Drive', 'Petrol', '20.32 km/l', 5, '5 Star (Global NCAP)'),
+        (('Skoda', 'Slavia'), 'Ambition 1.0 TSI AT', '1429000', '1.0L TSI 3-Cylinder Turbo Petrol', 114, 178, 190, 10.9, 'Automatic (TC) - 6 Gears, Paddle Shift', 'Front Wheel Drive', 'Petrol', '18.73 km/l', 5, '5 Star (Global NCAP)'),
+        (('Skoda', 'Slavia'), 'Monte Carlo 1.5 TSI DSG', '1913000', '1.5L TSI Turbo Petrol with ACT', 148, 250, 190, 8.8, 'Automatic (DSG) - 7 Gears, Paddle Shift', 'Front Wheel Drive', 'Petrol', '19.36 km/l', 5, '5 Star (Global NCAP)'),
+        (('Skoda', 'Kushaq'), 'Active 1.0 TSI MT', '1189000', '1.0L TSI 3-Cylinder Turbo Petrol', 114, 178, 185, 10.6, 'Manual - 6 Gears', 'Front Wheel Drive', 'Petrol', '19.76 km/l', 5, '5 Star (Global NCAP)'),
+        (('Skoda', 'Kushaq'), 'Ambition 1.0 TSI AT', '1549000', '1.0L TSI 3-Cylinder Turbo Petrol', 114, 178, 185, 11.1, 'Automatic (TC) - 6 Gears, Paddle Shift', 'Front Wheel Drive', 'Petrol', '18.09 km/l', 5, '5 Star (Global NCAP)'),
+        (('Skoda', 'Kushaq'), 'Monte Carlo 1.5 TSI DSG', '2049000', '1.5L TSI Turbo Petrol with ACT', 148, 250, 185, 8.9, 'Automatic (DSG) - 7 Gears, Paddle Shift', 'Front Wheel Drive', 'Petrol', '18.86 km/l', 5, '5 Star (Global NCAP)'),
+        (('Jeep', 'Compass'), 'Sport 2.0 Diesel MT', '2069000', '2.0L Multijet II Turbo Diesel', 168, 350, 190, 10.5, 'Manual - 6 Gears', 'Front Wheel Drive', 'Diesel', '17.3 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Jeep', 'Compass'), 'Longitude 2.0 Diesel AT', '2479000', '2.0L Multijet II Turbo Diesel', 168, 350, 190, 10.2, 'Automatic (TC) - 9 Gears', 'Front Wheel Drive', 'Diesel', '15.3 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Jeep', 'Compass'), 'Night Eagle 2.0 Diesel AT', '2619000', '2.0L Multijet II Turbo Diesel', 168, 350, 190, 10.2, 'Automatic (TC) - 9 Gears', 'Front Wheel Drive', 'Diesel', '15.3 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Jeep', 'Wrangler'), 'Unlimited Sahara 2.0 Turbo AT', '6765000', '2.0L GME T4 Turbocharged Inline-4 Petrol', 268, 400, 160, 8.1, 'Automatic (TC) - 8 Gears, Command-Trac 4x4', 'Four-Wheel Drive', 'Petrol', '11.4 km/l', 5, '4 Star (Euro NCAP)'),
+        (('BYD', 'Atto 3'), 'Dynamic 49.92 kWh', '2499000', '49.92 kWh Blade Battery', 201, 310, 160, 7.9, 'Automatic - 1 Gears', 'Front Wheel Drive', 'Electric', '468 km', 5, '5 Star (Euro NCAP)'),
+        (('BYD', 'Atto 3'), 'Premium 60.48 kWh', '2985000', '60.48 kWh Blade Battery', 201, 310, 160, 7.3, 'Automatic - 1 Gears', 'Front Wheel Drive', 'Electric', '521 km', 5, '5 Star (Euro NCAP)'),
+        (('BYD', 'Seal'), 'Dynamic RWD 61.44 kWh', '4100000', '61.44 kWh Blade Battery', 201, 310, 180, 7.5, 'Automatic - 1 Gears', 'Rear Wheel Drive', 'Electric', '510 km', 5, '5 Star (Euro NCAP)'),
+        (('BYD', 'Seal'), 'Premium RWD 82.56 kWh', '4555000', '82.56 kWh Blade Battery', 308, 360, 180, 5.9, 'Automatic - 1 Gears', 'Rear Wheel Drive', 'Electric', '650 km', 5, '5 Star (Euro NCAP)'),
+        (('Land Rover', 'Defender'), '90 SE 2.0 Petrol', '9700000', '2.0L P300 Turbocharged Inline-4 Petrol', 296, 400, 191, 7.1, 'Automatic (TC) - 8 Gears, All-Terrain AWD', 'All-Wheel Drive', 'Petrol', '10.8 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Land Rover', 'Defender'), '110 X-Dynamic HSE 3.0 Petrol', '14000000', '3.0L P400 Inline-6 Turbo Petrol MHEV', 395, 550, 191, 6.1, 'Automatic (TC) - 8 Gears, Terrain Response 2', 'All-Wheel Drive', 'Mild Hybrid(Electric + Petrol)', '9.8 km/l', 7, '5 Star (Euro NCAP)'),
+        (('Land Rover', 'Defender'), '130 Outbound 3.0 Diesel', '14600000', '3.0L D300 Inline-6 Twin Turbo Diesel', 296, 650, 191, 7.5, 'Automatic (TC) - 8 Gears, Electronic Air Suspension', 'All-Wheel Drive', 'Diesel', '10.9 km/l', 8, '5 Star (Euro NCAP)'),
+        (('Land Rover', 'Range Rover'), 'SE 3.0 Diesel LWB', '27000000', '3.0L D350 Inline-6 Turbocharged Diesel MHEV', 346, 700, 234, 6.3, 'Automatic (TC) - 8 Gears, All-Wheel Steering', 'All-Wheel Drive', 'Mild Hybrid(Electric + Diesel)', '11.8 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Land Rover', 'Range Rover'), 'SV 4.4 V8 Petrol', '44000000', '4.4L Twin-Turbo V8 Petrol (BMW N63 based)', 523, 750, 261, 4.6, 'Automatic (TC) - 8 Gears, Paddle Shift', 'All-Wheel Drive', 'Petrol', '8.5 km/l', 4, '5 Star (Euro NCAP)'),
+        (('Porsche', '911'), 'Carrera Base', '18600000', '3.0L Twin-Turbo Flat-6 Boxer Petrol', 388, 450, 294, 4.0, 'Automatic (PDK) - 8 Gears, Paddle Shift', 'Rear Wheel Drive', 'Petrol', '9.4 km/l', 4, '5 Star (Euro NCAP)'),
+        (('Porsche', '911'), 'Carrera 4 GTS', '27500000', '3.6L T-Hybrid Single Turbo Flat-6 Boxer', 534, 610, 312, 3.0, 'Automatic (PDK) - 8 Gears, Launch Control', 'All-Wheel Drive', 'Hybrid (Electric + Petrol)', '9.2 km/l', 4, '5 Star (Euro NCAP)'),
+        (('Porsche', '911'), 'GT3 RS', '35000000', '4.0L Naturally Aspirated Flat-6 Boxer', 518, 465, 296, 3.2, 'Automatic (PDK) - 7 Gears, DRS Aero', 'Rear Wheel Drive', 'Petrol', '7.5 km/l', 2, 'Not Tested'),
+        (('Porsche', '911'), 'Turbo S', '33500000', '3.8L Twin-Turbo Flat-6 Boxer Petrol', 641, 800, 330, 2.7, 'Automatic (PDK) - 8 Gears, Sport Chrono', 'All-Wheel Drive', 'Petrol', '8.3 km/l', 4, '5 Star (Euro NCAP)'),
+        (('Porsche', 'Macan'), 'Macan Base 2.0', '8800000', '2.0L Turbocharged Inline-4 Petrol', 261, 400, 232, 6.2, 'Automatic (PDK) - 7 Gears, Paddle Shift', 'All-Wheel Drive', 'Petrol', '11.4 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Porsche', 'Macan'), 'Macan GTS', '15300000', '2.9L Twin-Turbo V6 Petrol', 434, 550, 272, 4.3, 'Automatic (PDK) - 7 Gears, Air Suspension', 'All-Wheel Drive', 'Petrol', '9.8 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Porsche', 'Macan'), 'Macan EV Turbo', '16900000', 'Dual PMSM Motor + 100 kWh Battery', 630, 1130, 260, 3.3, 'Automatic - 1 Gears', 'All-Wheel Drive', 'Electric', '591 km', 5, '5 Star (Euro NCAP)'),
+        (('Porsche', 'Taycan'), 'Taycan Base RWD', '18900000', 'Rear PMSM Motor + 89 kWh Battery', 402, 410, 230, 4.8, 'Automatic - 2-Speed Rear Transmission', 'Rear Wheel Drive', 'Electric', '590 km', 4, '5 Star (Euro NCAP)'),
+        (('Porsche', 'Taycan'), 'Taycan 4S', '21500000', 'Dual PMSM Motor + 105 kWh Battery Plus', 536, 710, 250, 3.7, 'Automatic - 2-Speed Rear Transmission', 'All-Wheel Drive', 'Electric', '642 km', 4, '5 Star (Euro NCAP)'),
+        (('Porsche', 'Taycan'), 'Taycan GTS', '24500000', 'Dual PMSM Motor + 93.4 kWh Battery', 590, 850, 250, 3.5, 'Automatic - 2-Speed Rear Transmission', 'All-Wheel Drive', 'Electric', '504 km', 4, '5 Star (Euro NCAP)'),
+        (('Lexus', 'RX'), '500h F-Sport Performance', '11800000', '2.4L Turbo Petrol Hybrid + Direct4 eAxle', 366, 460, 210, 6.2, 'Automatic (TC) - 6 Gears, Direct4 AWD', 'All-Wheel Drive', 'Hybrid (Electric + Petrol)', '14.2 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Lexus', 'ES'), '300h Exquisite', '6315000', '2.5L 4-Cylinder Petrol Hybrid (A25A-FXS)', 215, 221, 180, 8.9, 'Automatic (e-CVT)', 'Front Wheel Drive', 'Hybrid (Electric + Petrol)', '22.58 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Ferrari', 'Roma'), 'Spider', '42000000', '3.9L Twin-Turbocharged V8 Petrol', 612, 760, 320, 3.4, 'Automatic (DCT) - 8 Gears, F1 Dual-Clutch', 'Rear Wheel Drive', 'Petrol', '8.6 km/l', 2, 'Not Tested'),
+        (('Ferrari', '296 GTB'), '296 GTS Spider', '62400000', '3.0L 120° Twin-Turbo V6 + Electric Motor (PHEV)', 819, 740, 330, 2.9, 'Automatic (DCT) - 8 Gears, Retractable Hard Top', 'Rear Wheel Drive', 'Plug-in Hybrid (Electric + Petrol)', '13.2 km/l', 2, 'Not Tested'),
+        (('Lamborghini', 'Urus'), 'Urus S', '41800000', '4.0L Twin-Turbo V8 Petrol', 657, 850, 305, 3.5, 'Automatic (TC) - 8 Gears, Adaptive Air Suspension', 'All-Wheel Drive', 'Petrol', '7.1 km/l', 5, 'Not Tested'),
+        (('Lamborghini', 'Urus'), 'Urus SE Hybrid', '45700000', '4.0L Twin-Turbo V8 + Electric Motor (PHEV)', 789, 950, 312, 3.4, 'Automatic (TC) - 8 Gears, 25.9 kWh Battery', 'All-Wheel Drive', 'Plug-in Hybrid (Electric + Petrol)', '12.0 km/l', 5, 'Not Tested'),
+        (('BMW', '3 Series'), '330i M Sport', '6920000', '2.0L 4-Cylinder TwinPower Turbo Petrol', 255, 400, 250, 5.8, '8-Speed Steptronic Automatic (Torque Converter)', 'Rear Wheel Drive', 'Petrol', '16.1 km/l', 5, '5 Star (Euro NCAP)'),
+        (('BMW', '5 Series'), '520d M Sport', '8990000', '2.0L 4-Cylinder TwinPower Turbo Diesel', 194, 400, 235, 7.3, '8-Speed Steptronic Automatic (Torque Converter)', 'Rear Wheel Drive', 'Diesel', '20.3 km/l', 5, '5 Star (Euro NCAP)'),
+        (('BMW', '7 Series'), '735i Pure Excellence', '18500000', '3.0L Inline-6 Turbo Petrol MHEV', 282, 425, 250, 6.7, '8-Speed Steptronic Sport Automatic', 'Rear Wheel Drive', 'Mild Hybrid(Electric + Petrol)', '13.4 km/l', 5, 'Not Tested'),
+        (('BMW', 'M4'), 'Competition Convertible xDrive', '19200000', '3.0L Twin-Turbo Inline-6 (S58)', 523, 650, 250, 3.7, '8-Speed M Steptronic with Drivelogic', 'All-Wheel Drive', 'Petrol', '9.8 km/l', 4, '5 Star (Euro NCAP)'),
+        (('BMW', 'M2'), 'Manual 3.0 Petrol', '11800000', '3.0L Twin Turbo Inline-6 (S58)', 453, 550, 250, 4.2, '6-Speed Manual Gearbox', 'Rear Wheel Drive', 'Petrol', '9.8 km/l', 4, 'Not Tested'),
+        (('BMW', 'X1'), 'sDrive18i xLine', '4950000', '1.5L 3-Cylinder TwinPower Turbo', 134, 230, 208, 9.2, '7-Speed Dual-Clutch Automatic', 'Front Wheel Drive', 'Petrol', '16.35 km/l', 5, '5 Star (Euro NCAP)'),
+        (('BMW', 'X3'), 'xDrive30d M Sport', '7990000', '3.0L 6-Cylinder TwinPower Turbo Diesel', 282, 650, 245, 5.8, '8-Speed Steptronic Sport Automatic', 'All-Wheel Drive', 'Diesel', '15.2 km/l', 5, '5 Star (Euro NCAP)'),
+        (('BMW', 'X5'), 'xDrive50e M Sport PHEV', '12500000', '3.0L Inline-6 Turbo + Electric Motor (PHEV)', 483, 700, 250, 4.8, '8-Speed Steptronic Automatic, 25.7 kWh Battery', 'All-Wheel Drive', 'Plug-in Hybrid (Electric + Petrol)', '42.0 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Audi', 'A4'), '35 TDI Premium', '4450000', '2.0L TDI Turbo Diesel', 148, 320, 219, 8.7, 'Automatic (DCT) - 7 Gears, S tronic', 'Front Wheel Drive', 'Diesel', '18.2 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Audi', 'A4'), '45 TFSI Quattro Technology', '5850000', '2.0L TFSI Turbocharged Petrol', 248, 370, 250, 5.8, 'Automatic (DCT) - 7 Gears, Quattro AWD', 'All Wheel Drive', 'Petrol', '14.5 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Audi', 'A6'), '40 TDI Premium Plus', '7950000', '2.0L TDI Turbo Diesel', 201, 400, 246, 7.6, 'Automatic (DCT) - 7 Gears, S tronic', 'Front Wheel Drive', 'Diesel', '17.8 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Audi', 'A6'), '55 TFSI Quattro Technology', '9850000', '3.0L V6 TFSI Turbocharged Petrol MHEV', 335, 500, 250, 5.1, 'Automatic (DCT) - 7 Gears, Quattro AWD', 'All Wheel Drive', 'Mild Hybrid(Electric + Petrol)', '12.4 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Audi', 'Q3'), 'Sportback 40 TFSI Quattro S line', '7250000', '2.0L 4-Cylinder TFSI Petrol', 188, 320, 220, 7.3, 'Automatic (DCT) - 7 Gears, Quattro AWD', 'All Wheel Drive', 'Petrol', '14.93 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Audi', 'Q5'), 'Sportback 45 TFSI Quattro S line', '9550000', '2.0L TFSI Turbocharged I4', 261, 370, 240, 6.1, 'Automatic (DCT) - 7 Gears, Quattro AWD', 'All Wheel Drive', 'Petrol', '13.4 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Audi', 'Q7'), 'Bold Edition 55 TFSI Quattro', '12900000', '3.0L TFSI V6 + 48V Mild-Hybrid', 335, 500, 250, 5.6, 'Automatic (TC) - 8 Gears, Quattro AWD', 'All Wheel Drive', 'Mild Hybrid(Electric + Petrol)', '11.2 km/l', 7, '5 Star (Euro NCAP)'),
+        (('Audi', 'Q8'), '55 TFSI Quattro Black Edition', '16800000', '3.0L V6 TFSI Twin-Scroll Turbo Petrol', 335, 500, 250, 5.6, 'Automatic (TC) - 8 Gears, Quattro AWD', 'All Wheel Drive', 'Petrol', '9.2 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Mercedes-Benz', 'A Class'), 'A 200d Progressive Line', '4800000', '2.0L OM654 Turbo Diesel', 148, 320, 227, 8.2, 'Automatic (DCT) - 8 Gears', 'Front Wheel Drive', 'Diesel', '20.5 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Mercedes-Benz', 'C Class'), 'C 220d AMG Line', '6250000', '2.0L OM654M Turbo Diesel with ISG', 197, 440, 245, 7.3, 'Automatic (TC) - 9 Gears 9G-TRONIC', 'Rear Wheel Drive', 'Diesel', '17.6 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Mercedes-Benz', 'C Class'), 'C 300 AMG Line Night Edition', '6900000', '2.0L M254 Turbo Petrol with ISG', 255, 400, 250, 6.0, 'Automatic (TC) - 9 Gears 9G-TRONIC', 'Rear Wheel Drive', 'Petrol', '14.8 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Mercedes-Benz', 'E Class'), 'E 200 Exclusive', '7850000', '2.0L M254 Turbo Petrol with ISG', 201, 320, 240, 7.5, 'Automatic (TC) - 9 Gears 9G-TRONIC', 'Rear Wheel Drive', 'Petrol', '14.2 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Mercedes-Benz', 'E Class'), 'E 220d AMG Line', '8150000', '2.0L OM654M Turbo Diesel with ISG', 197, 440, 238, 7.4, 'Automatic (TC) - 9 Gears 9G-TRONIC', 'Rear Wheel Drive', 'Diesel', '18.1 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Mercedes-Benz', 'E Class'), 'E 450 4MATIC AMG Line LWB', '9250000', '3.0L M256 Inline-6 Turbo Petrol MHEV', 375, 500, 250, 4.5, 'Automatic (TC) - 9 Gears 9G-TRONIC', 'All-Wheel Drive', 'Mild Hybrid(Electric + Petrol)', '12.0 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Mercedes-Benz', 'S Class'), 'S 350d', '17700000', '3.0L OM656 Inline-6 Turbo Diesel', 282, 600, 250, 6.4, 'Automatic (TC) - 9 Gears 9G-TRONIC', 'Rear Wheel Drive', 'Diesel', '15.6 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Mercedes-Benz', 'S Class'), 'S 450 4MATIC', '18600000', '3.0L M256 Inline-6 Turbo Petrol MHEV', 362, 500, 250, 5.1, 'Automatic (TC) - 9 Gears 9G-TRONIC', 'All-Wheel Drive', 'Mild Hybrid(Electric + Petrol)', '12.8 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Mercedes-Benz', 'S Class'), 'Maybach S 580 4MATIC', '27200000', '4.0L V8 Biturbo Petrol with EQ Boost', 496, 700, 250, 4.8, 'Automatic (TC) - 9 Gears 9G-TRONIC', 'All-Wheel Drive', 'Mild Hybrid(Electric + Petrol)', '9.8 km/l', 4, '5 Star (Euro NCAP)'),
+        (('Mercedes-Benz', 'G Class'), 'G 400d AMG Line', '25500000', '2.9L OM656 Inline-6 Turbo Diesel', 326, 700, 210, 6.4, 'Automatic (TC) - 9 Gears 9G-TRONIC, 3 Diff Locks', 'All-Wheel Drive', 'Diesel', '11.2 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Volvo', 'XC60'), 'B6 AWD Ultimate', '8990000', '2.0L Turbo + Electric Supercharger Petrol MHEV', 295, 420, 180, 6.2, 'Automatic (TC) - 8 Gears Geartronic', 'All-Wheel Drive', 'Mild Hybrid(Electric + Petrol)', '12.5 km/l', 5, '5 Star (Euro NCAP)'),
+        (('Volvo', 'XC90'), 'Recharge T8 Plug-in Hybrid', '14000000', '2.0L Turbo Petrol + Electric Motor (PHEV)', 455, 709, 180, 5.3, 'Automatic (TC) - 8 Gears, 18.8 kWh Battery', 'All-Wheel Drive', 'Plug-in Hybrid (Electric + Petrol)', '41.6 km/l', 7, '5 Star (Euro NCAP)')
     ]
 
 
+    # Strict Foreign Key Crosscheck: Verify Brand and Model combination exists before inserting Variant
+    cur.execute("""
+        SELECT b.brand_name, m.model_name, m.model_id
+        FROM models m
+        JOIN brands b ON m.brand_id = b.brand_id
+    """)
+    valid_models = {(r[0], r[1]): r[2] for r in cur.fetchall()}
+
     for v in variants:
+        brand_name, model_name = v[0]
+        variant_name = v[1]
+
+        if (brand_name, model_name) not in valid_models:
+            print(f"[DATA INTEGRITY WARNING] Variant skipped: Model '{model_name}' under Brand '{brand_name}' not found in database. Variant '{variant_name}' cannot be inserted.")
+            continue
+
+        model_id = valid_models[(brand_name, model_name)]
         try:
-            brand_name, model_name = v[0]
-
-            cur.execute("""
-                SELECT m.model_id FROM models m
-                JOIN brands b ON m.brand_id = b.brand_id
-                WHERE b.brand_name = %s AND m.model_name = %s LIMIT 1
-            """, (brand_name, model_name))
-            model_row = cur.fetchone()
-
-            if not model_row:
-                continue
-
-            model_id = model_row[0]
-
             cur.execute("""
                 SELECT variant_id FROM variants 
                 WHERE model_id = %s AND variant_name = %s LIMIT 1
-            """, (model_id, v[1]))
+            """, (model_id, variant_name))
             if not cur.fetchone():
                 cur.execute("""
                     INSERT INTO variants (model_id, variant_name, price_inr, engine, power_bhp, torque_nm,
@@ -762,13 +1042,34 @@ def insert_sample_data(cur, conn):
                                           mileage_range, seating_capacity, safety_rating)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
-                    model_id, v[1], v[2], v[3], v[4], v[5], v[6], v[7],
+                    model_id, variant_name, v[2], v[3], v[4], v[5], v[6], v[7],
                     v[8], v[9], v[10], v[11], v[12], v[13]
                 ))
-
         except Exception as e:
-            pass
+            if "Duplicate entry" not in str(e):
+                print(f"[DATA INTEGRITY ERROR] Failed to insert variant '{variant_name}' for '{brand_name} {model_name}': {e}")
 
+    conn.commit()
+        # Enrich newly added variants with standard equipment and factory finishes if missing
+    cur.execute("""
+        SELECT v.variant_id FROM variants v
+        LEFT JOIN features f ON v.variant_id = f.variant_id
+        WHERE f.feature_id IS NULL
+    """)
+    unfeatured = [row[0] for row in cur.fetchall()]
+    for vid in unfeatured:
+        for fcat, fdesc in [
+            ("Safety", "Multi-Stage Airbags, ABS with EBD, Electronic Stability Program (ESP), Hill Hold Control, ISOFIX Child Seat Mounts, Tyre Pressure Monitoring"),
+            ("Infotainment", "High-Definition Touchscreen, Wireless Apple CarPlay & Android Auto, Connected Car Telematics, Premium Multi-Speaker Acoustic System"),
+            ("Comfort", "Multi-Zone Automatic Climate Control, Wireless Smartphone Charger, Cruise Control, Electrically Foldable ORVMs, Keyless Entry & Push-Button Start"),
+            ("Performance", "Drive Modes (Eco / Normal / Sport), Adaptive Electric Power Steering, Precision Disc Brakes Front & Rear")
+        ]:
+            cur.execute("INSERT INTO features (variant_id, feature_category, feature_description) VALUES (%s, %s, %s)", (vid, fcat, fdesc))
+        for cname, ctype in [
+            ("Onyx Black, Glacier White, Titan Grey, Carbon Metallic", "Exterior"),
+            ("Perforated Leatherette / Charcoal Fabric with Contrast Stitching", "Interior")
+        ]:
+            cur.execute("INSERT INTO colors (variant_id, color_name, color_type) VALUES (%s, %s, %s)", (vid, cname, ctype))
     conn.commit()
     print("✓ All variants inserted successfully!")
 
@@ -780,18 +1081,18 @@ def insert_sample_data(cur, conn):
         (('Mercedes-Benz','C Class', 'C200'),'Features','12.3" Digital Instrument Cluster, 11.9" MBUX Touchscreen Infotainment,Dual-zone Automatic Climate Control, Ambient Lighting with 64 Colours, Reverse Parking Camera, Keyless Go, LED High-Performance Headlamps, 7 Airbags, Active Brake Assist, ATTENTION ASSIST, Rain-Sensing Wipers, Hill Start Assist, Tyre Pressure Monitoring System'),
         (('Mercedes-Benz','C Class', 'C200'),'Interior','Dual Tone (Customisable)'),
         (('Mercedes-Benz','C Class', 'C200'),'Alloy_Wheels','18" Multi-Spoke Alloy Wheels'),
-        (('Mercedes-Benz','C Class', 'C200d'),'Features','12.3" Digital Instrument Cluster, 11.9" MBUX Touchscreen Infotainment, Dual-zone Automatic Climate Control, Ambient Lighting with 64 Colours, Reverse Parking Camera, Keyless Go, LED High-Performance Headlamps, 7 Airbags, Active Brake Assist, ATTENTION ASSIST, Rain-Sensing Wipers, Hill Start Assist, Tyre Pressure Monitoring System, Diesel Optimised Engine Tuning'),
-        (('Mercedes-Benz','C Class', 'C200d'),'Interior','Dual Tone (Customisable)'),
-        (('Mercedes-Benz','C Class', 'C200d'),'Alloy_Wheels','18" Multi-Spoke Alloy Wheels'),
+        (('Mercedes-Benz','C Class', 'C220d'),'Features','12.3" Digital Instrument Cluster, 11.9" MBUX Touchscreen Infotainment, Dual-zone Automatic Climate Control, Ambient Lighting with 64 Colours, Reverse Parking Camera, Keyless Go, LED High-Performance Headlamps, 7 Airbags, Active Brake Assist, ATTENTION ASSIST, Rain-Sensing Wipers, Hill Start Assist, Tyre Pressure Monitoring System, Diesel Optimised Engine Tuning'),
+        (('Mercedes-Benz','C Class', 'C220d'),'Interior','Dual Tone (Customisable)'),
+        (('Mercedes-Benz','C Class', 'C220d'),'Alloy_Wheels','18" Multi-Spoke Alloy Wheels'),
         (('Mercedes-Benz','C Class', 'C300'),'Features','12.3" Digital Cluster, 11.9" MBUX Touchscreen, Dual-zone Climate, Ambient Lighting, Reverse Camera, Keyless Go, LED Headlamps, 7 Airbags, Active Brake Assist, Rain-Sensing Wipers, Hill Start Assist, Tyre Pressure Monitor, AMG Performance Seats, Adaptive Suspension, Quad Exhausts, AMG Night Package, Sport Steering, 15-speaker Burmester Audio'),
         (('Mercedes-Benz','C Class', 'C300'),'Interior','Dual Tone (Customisable)'),
         (('Mercedes-Benz','C Class', 'C300'),'Alloy_Wheels','18" Multi-Spoke Alloy Wheels'),
         (('Mercedes-Benz','C Class AMG', 'C 43 4MATIC'),'Features','AMG-specific grille, 11.9-inch MBUX screen, sport seats, Burmester® 3D audio, adaptive suspension, track telemetry, and advanced driver aids.'),
         (('Mercedes-Benz','C Class AMG', 'C 43 4MATIC'),'Interior','Single Tone (Black with Yellow Contrast and Aluminium Trim)'),
         (('Mercedes-Benz','C Class AMG', 'C 43 4MATIC'),'Alloy_Wheels','20" AMG Light Alloy Wheels 4 fold 5-Double Spoke'),
-        (('Mercedes-Benz','C Class AMG', 'C 63 S E Performance'),'Features','AMG hybrid powertrain with F1-derived tech, performance steering, 11.9-inch MBUX, AMG Track Pace, premium Burmester® audio, adaptive suspension, and driver assist suite.'),
-        (('Mercedes-Benz','C Class AMG', 'C 63 S E Performance'),'Interior','Single Tone (Black)'),
-        (('Mercedes-Benz','C Class AMG', 'C 63 S E Performance'),'Alloy_Wheels','20" AMG Light Alloy Wheels 4 fold 5-Double Spoke'),
+        (('Mercedes-Benz','C Class AMG', 'C 63 SE Performance'),'Features','AMG hybrid powertrain with F1-derived tech, performance steering, 11.9-inch MBUX, AMG Track Pace, premium Burmester® audio, adaptive suspension, and driver assist suite.'),
+        (('Mercedes-Benz','C Class AMG', 'C 63 SE Performance'),'Interior','Single Tone (Black)'),
+        (('Mercedes-Benz','C Class AMG', 'C 63 SE Performance'),'Alloy_Wheels','20" AMG Light Alloy Wheels 4 fold 5-Double Spoke'),
         (('Mercedes-Benz','E Class', 'E200'),'Features','12.3" Digital Cluster, 11.9" MBUX Touchscreen, Dual-zone Climate, Ambient Lighting, Reverse Camera, Keyless Go, LED Headlamps, 7 Airbags, Active Brake Assist, ATTENTION ASSIST, Rain-Sensing Wipers, Hill Start Assist, Tyre Pressure Monitor. Premium interiors with 15-speaker Burmester audio, powered memory seats, adaptive cruise, AMG-style accents.'),
         (('Mercedes-Benz','E Class', 'E200'),'Interior','Dual Tone (Cinnamon Brown / Black/Anthracite / Beige)'),
         (('Mercedes-Benz','E Class', 'E200'),'Alloy_Wheels','18" 5-Spoke Light Alloy Wheel in Black with High Sheen'),
@@ -834,9 +1135,9 @@ def insert_sample_data(cur, conn):
         (('Mercedes-Benz','GLA', '220d 4Matic'),'Features','10.25" Digital Display, Dual-zone Climate Control, LED Headlamps, 7 Airbags, Active Brake Assist ATTENTION ASSIST Rain-Sensing Wipers, Hill Start Assist, Tyre Pressure Monitoring System, Burmester Audio System, AMG Styling Package, AMG Performance Steering Wheel, AMG Sports Pedals, AMG Floor Mats, AMG Night Package'),
         (('Mercedes-Benz','GLA', '220d 4Matic'),'Interior','Single Tone (Black with Contrast Red Stitching, optional Light Aluminium Trim), AMG Line exterior'),
         (('Mercedes-Benz','GLA', '220d 4Matic'),'Alloy_Wheels','19" 5-Spoke Light Alloy Wheel'),
-        (('Mercedes-Benz','GLA', '220d AMG Line 4Matic'),'Features','10.25" Digital Display, Dual-zone Climate Control, LED Headlamps, 7 Airbags, Active Brake Assist ATTENTION ASSIST Rain-Sensing Wipers, Hill Start Assist, Tyre Pressure Monitoring System, Burmester Audio System, AMG Styling Package, AMG Performance Steering Wheel, AMG Sports Pedals, AMG Floor Mats, AMG Night Package, AMG Performance Exhaust System, AMG Illuminated Door Sills, AMG Sports Seats, AMG Sport Suspension'),
-        (('Mercedes-Benz','GLA', '220d AMG Line 4Matic'),'Interior','Single Tone (Black with Contrast Red Stitching, optional Light Aluminium Trim), Full AMG body kit'),
-        (('Mercedes-Benz','GLA', '220d AMG Line 4Matic'),'Alloy_Wheels','19" 5-Spoke Light Alloy Wheel'),
+        (('Mercedes-Benz','GLA AMG', '220d AMG Line 4Matic'),'Features','10.25" Digital Display, Dual-zone Climate Control, LED Headlamps, 7 Airbags, Active Brake Assist ATTENTION ASSIST Rain-Sensing Wipers, Hill Start Assist, Tyre Pressure Monitoring System, Burmester Audio System, AMG Styling Package, AMG Performance Steering Wheel, AMG Sports Pedals, AMG Floor Mats, AMG Night Package, AMG Performance Exhaust System, AMG Illuminated Door Sills, AMG Sports Seats, AMG Sport Suspension'),
+        (('Mercedes-Benz','GLA AMG', '220d AMG Line 4Matic'),'Interior','Single Tone (Black with Contrast Red Stitching, optional Light Aluminium Trim), Full AMG body kit'),
+        (('Mercedes-Benz','GLA AMG', '220d AMG Line 4Matic'),'Alloy_Wheels','19" 5-Spoke Light Alloy Wheel'),
         (('Mercedes-Benz','GLC', '200d 4Matic'),'Features','12.3" Digital Cluster, 10.25" MBUX touchscreen, Dual-zone climate, Ambient lighting; Reverse camera, Keyless Go, LED headlamps, 7 airbags, Active Brake Assist, Hill Start Assist.'),
         (('Mercedes-Benz','GLC', '200d 4Matic'),'Interior','Dual Tone (Black/ Macchiato Beige and Sienna brown), AMG Line exterior, Night Package, chrome surround options.'),
         (('Mercedes-Benz','GLC', '200d 4Matic'),'Alloy_Wheels','19" 5-Double Spoke Alloy Wheel'),
@@ -867,9 +1168,9 @@ def insert_sample_data(cur, conn):
         (('Mercedes-Benz','G Class', 'G 580 with EQ Technology'),'Features','Dual 12.3" displays (instrument & MBUX), 360° camera, BURMESTER 18-speaker Dolbly Atmos sound; G-Turn (rotate on spot), G-Steering, G-Crawl, adaptive off-road modes, water-wading 850 mm'),
         (('Mercedes-Benz','G Class', 'G 580 with EQ Technology'),'Interior','Dual Tone (Nappa leather silver pearl/black), AMG carbon-fibre trim elements, MANUFAKTUR trim in black flamed open-pore ash wood, Metal structure trim element, MANUFAKTUR open-pore grey oak wood trim element, Black piano lacquer trim element, Open-pore natural walnut wood trim element, High-gloss light brown sen wood trim element'),
         (('Mercedes-Benz','G Class', 'G 580 with EQ Technology'),'Alloy_Wheels','20" AMG Silver/Black 10-Spoke Light Alloy Wheels'),
-        (('Mercedes-Benz','G Class AMG', 'G63'),'Features','Off-road modes, G-turn, 360° cam, massaging seats, adaptive anti-roll suspension, dual displays, ADAS'),
-        (('Mercedes-Benz','G Class AMG', 'G63'),'Interior','Dual Tone (Macchiato beige/black/Truffle brown/black), Boxy body, ladder frame, optional Collector\'s Edition, Night pack'),
-        (('Mercedes-Benz','G Class AMG', 'G63'),'Alloy_Wheels','20" std, optional 21"/22" AMG'),
+        (('Mercedes-Benz','G Class AMG', 'G 63'),'Features','Off-road modes, G-turn, 360° cam, massaging seats, adaptive anti-roll suspension, dual displays, ADAS'),
+        (('Mercedes-Benz','G Class AMG', 'G 63'),'Interior','Dual Tone (Macchiato beige/black/Truffle brown/black), Boxy body, ladder frame, optional Collector\'s Edition, Night pack'),
+        (('Mercedes-Benz','G Class AMG', 'G 63'),'Alloy_Wheels','20" std, optional 21"/22" AMG'),
         (('Mercedes-Benz','CLE Cabriolet AMG', 'CLE 300 CABRIOLET 4MATIC'),'Features','Widescreen MBUX cockpit, double rear airbags, AIRCAP, AIRSCARF, 360° parking assist, ambient lighting, Burmester 3D audio, elegant open-air luxury'),
         (('Mercedes-Benz','CLE Cabriolet AMG', 'CLE 300 CABRIOLET 4MATIC'),'Interior','Dual Tone (Tonka brown / black/Power red / black), Metal Structure Trim Element'),
         (('Mercedes-Benz','CLE Cabriolet AMG', 'CLE 300 CABRIOLET 4MATIC'),'Alloy_Wheels','19" AMG Multi-Spoke Alloys'),
@@ -1230,30 +1531,34 @@ def insert_sample_data(cur, conn):
         (('Lamborghini', 'Revuelto', 'Coupe'), 'Alloy_Wheels', '21" Front / 22" Rear Altanero Forged Shiny Black Alloy Wheels')
     ]
 
+    # Strict Foreign Key Crosscheck: Verify Variant exists before inserting Features
+    cur.execute("""
+        SELECT b.brand_name, m.model_name, v.variant_name, v.variant_id
+        FROM variants v
+        JOIN models m ON v.model_id = m.model_id
+        JOIN brands b ON m.brand_id = b.brand_id
+    """)
+    valid_variants = {(r[0], r[1], r[2]): r[3] for r in cur.fetchall()}
+
     for item in car_features:
+        brand, model, variant_name = item[0]
+        cat, desc = item[1], item[2]
+
+        if (brand, model, variant_name) not in valid_variants:
+            print(f"[DATA INTEGRITY WARNING] Feature skipped: Variant '{variant_name}' for '{brand} {model}' not found in database.")
+            continue
+
+        variant_id = valid_variants[(brand, model, variant_name)]
         try:
-            brand, model, variant_name = item[0]
-            cat = item[1]
-            desc = item[2]
-            cur.execute("""
-                SELECT v.variant_id 
-                FROM variants v
-                JOIN models m ON v.model_id = m.model_id
-                JOIN brands b ON m.brand_id = b.brand_id
-                WHERE b.brand_name = %s AND m.model_name = %s AND v.variant_name = %s
-                LIMIT 1
-            """, (brand, model, variant_name))
-            row = cur.fetchone()
-            if row:
-                variant_id = row[0]
-                cur.execute("SELECT feature_id FROM features WHERE variant_id = %s AND feature_category = %s LIMIT 1", (variant_id, cat))
-                if not cur.fetchone():
-                    cur.execute("""
-                        INSERT INTO features (variant_id, feature_category, feature_description)
-                        VALUES (%s, %s, %s)
-                    """, (variant_id, cat, desc))
-        except Exception:
-            pass
+            cur.execute("SELECT feature_id FROM features WHERE variant_id = %s AND feature_category = %s LIMIT 1", (variant_id, cat))
+            if not cur.fetchone():
+                cur.execute("""
+                    INSERT INTO features (variant_id, feature_category, feature_description)
+                    VALUES (%s, %s, %s)
+                """, (variant_id, cat, desc))
+        except Exception as e:
+            if "Duplicate entry" not in str(e):
+                print(f"[DATA INTEGRITY ERROR] Error inserting feature for '{brand} {model} {variant_name}': {e}")
 
     conn.commit()
     print("✓ All Features inserted successfully!")
@@ -1266,7 +1571,7 @@ def insert_sample_data(cur, conn):
         (('Mercedes-Benz','C Class', 'C220d'), 'Obsidian Black, Mojave Silver,Selenite Grey,Sodalite Blue, Opalith White, Hi-Tech Silver', 'Metallic'),
         (('Mercedes-Benz','C Class', 'C300'), 'Obsidian Black,Sodalite Blue, Patagonia red bright, Opalith White', 'Metallic'),
         (('Mercedes-Benz','C Class AMG', 'C 43 4MATIC'), 'Polar White, Selenite Grey Metallic, Sodalite Blue Metallic, Hi Tech Silver, Spectral Blue,  Graphite Grey, Opalite White Bright, Patagonia Red Bright, Graphite Grey Magno', 'Metallic'),
-        (('Mercedes-Benz','C Class AMG', 'C 63 S E Performance'), 'Polar White, Selenite Grey Metallic, Sodalite Blue Metallic, Hi Tech Silver, Spectral Blue,  Graphite Grey, Opalith white metallic, Patagonia red metallic bright, Graphite Grey Magno', 'Metallic'),
+        (('Mercedes-Benz','C Class AMG', 'C 63 SE Performance'), 'Polar White, Selenite Grey Metallic, Sodalite Blue Metallic, Hi Tech Silver, Spectral Blue,  Graphite Grey, Opalith white metallic, Patagonia red metallic bright, Graphite Grey Magno', 'Metallic'),
         (('Mercedes-Benz','E Class', 'E200'), 'High Tech Silver,Graphite Grey,Obsidian Black,Polar White, Nautic Blue', 'Metallic'),
         (('Mercedes-Benz','E Class', 'E200d'), 'High Tech Silver,Graphite Grey,Obsidian Black,Polar White, Nautic Blue', 'Metallic'),
         (('Mercedes-Benz','E Class', 'E450 4Matic'), 'High Tech Silver,Graphite Grey,Obsidian Black,Polar White, Nautic Blue', 'Metallic'),
@@ -1293,7 +1598,7 @@ def insert_sample_data(cur, conn):
         (('Mercedes-Benz','GLS AMG', '450d 4MATIC AMG Line'), 'Polar White,Obsidian Black, High-tech Silver, Sodalite Blue,  Selenite Grey', 'Metallic'),
         (('Mercedes-Benz','G Class', 'G 580 with EQ Technology'), 'Obsidian Black, Opalite White Bright, Classic Grey, Opalite White Magno, South Seas Blue Magno', 'Metallic'),
         (('Mercedes-Benz','G Class AMG', 'G 63'), 'Classic G shades + Manufaktur options', 'Metallic'),
-        (('Mercedes-Benz','CLE Cabriolet', 'CLE 300 CABRIOLET 4MATIC'), 'Obsidian Black, Graphite Grey, Hi-Tech Silver, Spectral Blue', 'Metallic'),
+        (('Mercedes-Benz','CLE Cabriolet AMG', 'CLE 300 CABRIOLET 4MATIC'), 'Obsidian Black, Graphite Grey, Hi-Tech Silver, Spectral Blue', 'Metallic'),
         (('Jaguar', 'F-Pace', 'S R-Dynamic 2.0 Petrol'), 'Fuji White, Santorini Black, Firenze Red, Eiger Grey, Portofino Blue', 'Solid'),
         (('Jaguar', 'F-Pace', 'S R-Dynamic 2.0 Diesel'), 'Fuji White, Santorini Black, Firenze Red, Eiger Grey, Portofino Blue', 'Solid'),
         (('Volvo', 'EX30', 'RWD Ultra'), 'Cloud Blue,Crystal White,Onyx Black,Vapour Grey,Sand Dune', 'Metallic'),
@@ -1403,63 +1708,48 @@ def insert_sample_data(cur, conn):
     ]
 
 
+    # Strict Foreign Key Crosscheck: Verify Variant exists before inserting Colors
     for color in car_colors:
-        try:
-            brand, model, variant_name = color[0]
-            color_name = color[1]
-            color_type = color[2]
+        brand, model, variant_name = color[0]
+        color_name, color_type = color[1], color[2]
 
-            cur.execute("""
-                SELECT v.variant_id 
-                FROM variants v
-                JOIN models m ON v.model_id = m.model_id
-                JOIN brands b ON m.brand_id = b.brand_id
-                WHERE b.brand_name = %s AND m.model_name = %s AND v.variant_name = %s
-                LIMIT 1
-            """, (brand, model, variant_name))
-            row = cur.fetchone()
-            if row:
-                variant_id = row[0]
-                cur.execute("SELECT color_id FROM colors WHERE variant_id = %s AND color_name = %s LIMIT 1", (variant_id, color_name))
-                if not cur.fetchone():
-                    cur.execute("""
-                        INSERT INTO colors (variant_id, color_name, color_type)
-                        VALUES (%s, %s, %s)
-                    """, (variant_id, color_name, color_type))
+        if (brand, model, variant_name) not in valid_variants:
+            print(f"[DATA INTEGRITY WARNING] Color skipped: Variant '{variant_name}' for '{brand} {model}' not found in database.")
+            continue
+
+        variant_id = valid_variants[(brand, model, variant_name)]
+        try:
+            cur.execute("SELECT color_id FROM colors WHERE variant_id = %s AND color_name = %s LIMIT 1", (variant_id, color_name))
+            if not cur.fetchone():
+                cur.execute("""
+                    INSERT INTO colors (variant_id, color_name, color_type)
+                    VALUES (%s, %s, %s)
+                """, (variant_id, color_name, color_type))
         except Exception as e:
-            pass
+            if "Duplicate entry" not in str(e):
+                print(f"[DATA INTEGRITY ERROR] Error inserting color for '{brand} {model} {variant_name}': {e}")
 
     conn.commit()
     print("✓ All Colors inserted successfully!")
 
 def generate_booking_id():
-    letters = ''.join(random.choices(string.ascii_uppercase, k=2))
-    numbers = ''.join(random.choices(string.digits, k=6))
+    """Generates unique alphanumeric reference ID formatted as BK-XXXXXX."""
+    letters = ''.join(random.choices(string.ascii_uppercase, k=4))
+    numbers = ''.join(random.choices(string.digits, k=2))
     return f"BK-{letters}{numbers}"
 
-# ---------- Web App UI ----------
 
-# Inject Custom High-End Styling
-inject_custom_css()
 
-# Retrieve Configuration
+# ---------- Web App UI Setup (STRICTLY NATIVE PYTHON) ----------
 db_cfg, db_source = get_db_config()
 
-# Sidebar Setup
-st.sidebar.markdown("""
-    <div style="display: flex; align-items: center; margin-bottom: 12px;">
-        <span style="font-size: 1.8rem; margin-right: 8px;">🚗</span>
-        <div>
-            <h3 style="margin: 0; font-size: 1.2rem; font-weight: 800; color: #FFFFFF;">AutoSpec</h3>
-            <span style="font-size: 0.75rem; color: #8B949E; letter-spacing: 0.05em; text-transform: uppercase;">v2.0 Elite Intelligence</span>
-        </div>
-    </div>
-""", unsafe_allow_html=True)
+# Sidebar: Navigation Console & System Telemetry
+st.sidebar.title("AutoSpec Web")
+st.sidebar.caption("Automotive Intelligence Platform")
 
-# Connect Database
 conn = get_db_connection(db_cfg)
 if not conn:
-    st.error("Failed to establish database connection. Please check your settings.")
+    st.error("Fatal: Database connection could not be established. Check server configuration.")
     st.stop()
 
 cursor = conn.cursor(buffered=True)
@@ -1470,43 +1760,86 @@ try:
     brand_cnt = cursor.fetchone()
     if not brand_cnt or brand_cnt[0] < 23:
         insert_sample_data(cursor, conn)
-except Exception:
-    pass
+except Exception as e:
+    print(f"[DATA INTEGRITY ERROR] Auto-seed check failed: {e}")
 
-# Live Status Indicator
-st.sidebar.markdown(f"""
-    <div class="db-status-pill">
-        <span class="status-dot"></span>
-        <span>Connected ({db_source})</span>
-    </div>
-""", unsafe_allow_html=True)
+# ----------------- SIDEBAR NAVIGATION -----------------
+with st.sidebar.container(border=True):
+    st.caption("NAVIGATION CONSOLE")
+    mode = st.radio(
+        "Operational Mode",
+        ["User Mode", "Admin Mode"],
+        index=0,
+        help="Select User Mode for vehicle discovery, comparison, and booking, or Admin Mode for management analytics and database control."
+    )
 
-mode = st.sidebar.radio("Navigation Mode", ["User Mode", "Admin Mode"], index=0)
+with st.sidebar.container(border=True):
+    st.caption("THEME SWITCHER (7 PALETTES)")
+    theme_names_list = list(THEMES.keys())
+    current_th = st.session_state.get("app_theme", "Dark Mode")
+    cur_idx = theme_names_list.index(current_th) if current_th in theme_names_list else 0
 
-# ===================== USER MODE =====================
+    def on_theme_change():
+        st.session_state["app_theme"] = st.session_state["app_theme_selector"]
+
+    chosen_theme = st.selectbox(
+        "Visual Palette",
+        theme_names_list,
+        index=cur_idx,
+        key="app_theme_selector",
+        on_change=on_theme_change,
+        help="Select any theme to transform colors across the site."
+    )
+    st.caption(f"Active Theme: **{chosen_theme}**")
+
+# Helper function for vehicle image lookup
+def get_car_image(brand, model):
+    safe_b = brand.replace(" ", "_")
+    safe_m = model.replace(" ", "_")
+    p = os.path.join("images", f"{safe_b}_{safe_m}.jpg")
+    if os.path.exists(p):
+        return p
+    return f"https://placehold.co/800x450/161B22/E63946/png?text={safe_b}+{safe_m}"
+
+# Helper function for Indian currency formatting
+def format_inr(val):
+    if not val or val == 0:
+        return "Price on Request"
+    val = float(val)
+    if val >= 10000000:
+        return f"₹ {val / 10000000:.2f} Cr"
+    elif val >= 100000:
+        return f"₹ {val / 100000:.2f} Lakh"
+    return f"₹ {val:,.2f}"
+
+def format_rupees(val):
+    try:
+        return f"₹ {int(val):,}"
+    except Exception:
+        return str(val)
+
+# ==============================================================================
+# USER MODE
+# ==============================================================================
 if mode == "User Mode":
-    # Hero Banner
-    st.markdown("""
-        <div class="hero-banner">
-            <div>
-                <h1 class="hero-title">AutoSpec Automotive Intelligence</h1>
-                <p class="hero-subtitle">Comprehensive luxury vehicle specifications, dynamic configuration, and instant booking reservation.</p>
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
+    st.title("AutoSpec Web")
+    st.caption("Comprehensive vehicle specifications, performance benchmarking, dynamic financial calculation, and reservations.")
+    st.divider()
 
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "🏢 Explore Brands",
-        "🔍 Search & Filter",
-        "📊 Car Details & Specs",
-        "📝 Book a Car"
+    tab1, tab2, tab3, tab_emi, tab4, tab5 = st.tabs([
+        "Explore Brands",
+        "Search & Filter",
+        "Car Details",
+        "EMI Calculator",
+        "Compare Cars",
+        "Book a Car"
     ])
 
     # ------------------ TAB 1: EXPLORE BRANDS ------------------
     with tab1:
         st.subheader("Automotive Manufacturers")
-        st.caption("Browse prestige manufacturers across Germany, Sweden, and the United Kingdom.")
-        
+        st.caption("Browse prestige manufacturers across global automotive markets.")
+
         cursor.execute("""
             SELECT b.brand_name, b.country_of_origin, b.year_founded,
                    COUNT(DISTINCT m.model_id) as total_models,
@@ -1518,55 +1851,55 @@ if mode == "User Mode":
             ORDER BY b.brand_name
         """)
         brand_data = cursor.fetchall()
-        
-        # Summary KPI metrics
-        col_k1, col_k2, col_k3 = st.columns(3)
-        with col_k1:
-            st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-label">Manufacturers</div>
-                    <div class="metric-value">{len(brand_data)}</div>
-                    <div class="metric-sub">Global Luxury Brands</div>
-                </div>
-            """, unsafe_allow_html=True)
-        with col_k2:
-            total_m = sum(row[3] for row in brand_data)
-            st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-label">Vehicle Models</div>
-                    <div class="metric-value">{total_m}</div>
-                    <div class="metric-sub">Across All Categories</div>
-                </div>
-            """, unsafe_allow_html=True)
-        with col_k3:
-            total_v = sum(row[4] for row in brand_data)
-            st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-label">Engineered Variants</div>
-                    <div class="metric-value">{total_v}</div>
-                    <div class="metric-sub">Active Trim Configurations</div>
-                </div>
-            """, unsafe_allow_html=True)
 
-        st.write("")
-        df_brands = pd.DataFrame(brand_data, columns=["Brand", "Country of Origin", "Year Founded", "Models Count", "Variants Count"])
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            with st.container(border=True):
+                st.metric("Total Manufacturers", len(brand_data))
+        with c2:
+            total_m = sum(row[3] for row in brand_data)
+            with st.container(border=True):
+                st.metric("Cataloged Models", total_m)
+        with c3:
+            total_v = sum(row[4] for row in brand_data)
+            with st.container(border=True):
+                st.metric("Production Variants", total_v)
+
+        st.divider()
+
+        all_countries = sorted(list(set(b[1] for b in brand_data if b[1])))
+        selected_country = st.selectbox("Filter by Country of Origin", ["All Countries"] + all_countries, key="mfg_country")
+
+        filtered_brands = brand_data
+        if selected_country != "All Countries":
+            filtered_brands = [b for b in brand_data if b[1] == selected_country]
+
+        df_brands = pd.DataFrame(
+            filtered_brands,
+            columns=["Manufacturer", "Country of Origin", "Year Founded", "Models Count", "Variants Count"]
+        )
         st.dataframe(df_brands, use_container_width=True, hide_index=True)
 
-    # ------------------ TAB 2: SEARCH & FILTER ------------------
+    # ------------------ TAB 2: SEARCH & FILTER (NATIVE DATAFRAME ENHANCEMENTS) ------------------
     with tab2:
-        st.subheader("Filter & Compare Vehicles")
-        st.caption("Find the ideal vehicle matching your preferred powertrain and budget parameters.")
-        
-        col1, col2, col3 = st.columns([1, 1, 1])
-        with col1:
-            fuel_filter = st.selectbox("Fuel / Powertrain Type", ["All", "Petrol", "Diesel", "Electric", "Hybrid"])
-        with col2:
-            body_filter = st.selectbox("Body Type", ["All", "SUV", "Sedan", "Coupé", "Gran Coupé", "SportBack", "Convertible", "Roadster"])
-        with col3:
-            max_price = st.slider("Max Price (INR)", min_value=3000000, max_value=50000000, value=50000000, step=1000000, format="₹%d")
+        st.subheader("Search & Filter Vehicles")
+        st.caption("Find vehicles matching your powertrain, body style, and pricing parameters.")
 
+        with st.container(border=True):
+            col_f1, col_f2, col_f3, col_f4 = st.columns([1, 1, 1.2, 0.8])
+            with col_f1:
+                fuel_filter = st.selectbox("Powertrain", ["All", "Petrol", "Diesel", "Electric", "Hybrid"], key="sr_fuel")
+            with col_f2:
+                body_filter = st.selectbox("Body Architecture", ["All", "SUV", "Sedan", "Coupé", "Gran Coupé", "SportBack", "Convertible", "Roadster"], key="sr_body")
+            with col_f3:
+                max_price = st.slider("Max Price (INR)", min_value=500000, max_value=50000000, value=50000000, step=500000, format="₹%d", key="sr_price")
+            with col_f4:
+                curr_view = st.radio("Display View", ["Data Table", "Grid Cards"], index=0, horizontal=True, key="sr_view")
+
+        t_start = time.time()
         query = """
-            SELECT b.brand_name, m.model_name, m.body_type, v.variant_name, v.price_inr, v.fuel_type, v.power_bhp, v.transmission
+            SELECT b.brand_name, m.model_name, m.body_type, v.variant_name, v.price_inr,
+                   v.fuel_type, v.power_bhp, v.torque_nm, v.acceleration_0_100, v.top_speed_kmh, v.transmission
             FROM variants v
             JOIN models m ON v.model_id = m.model_id
             JOIN brands b ON m.brand_id = b.brand_id
@@ -1583,45 +1916,91 @@ if mode == "User Mode":
 
         query += " ORDER BY v.price_inr ASC"
         cursor.execute(query, params)
-        results = cursor.fetchall()
+        catalog_results = cursor.fetchall()
 
-        st.markdown(f"<span class='badge-pill'>Showing {len(results)} Matching Vehicles</span>", unsafe_allow_html=True)
+        st.caption(f"Displaying {len(catalog_results)} matching vehicles.")
 
-        if results:
-            df_search = pd.DataFrame(
-                results,
-                columns=["Brand", "Model", "Body Type", "Variant", "Price (INR)", "Powertrain", "Power (BHP)", "Transmission"]
-            )
-            df_search["Formatted Price"] = df_search["Price (INR)"].apply(lambda p: f"₹{p:,.2f}" if p else "TBD")
-            st.dataframe(
-                df_search[["Brand", "Model", "Body Type", "Variant", "Formatted Price", "Powertrain", "Power (BHP)", "Transmission"]],
-                use_container_width=True,
-                hide_index=True
-            )
+        if catalog_results:
+            if curr_view == "Data Table":
+                df_cat = pd.DataFrame(catalog_results, columns=[
+                    "Brand", "Model", "Body Architecture", "Trim Variant", "Price (INR)",
+                    "Powertrain", "Power (BHP)", "Torque (Nm)", "0-100 km/h (s)", "Top Speed (km/h)", "Transmission"
+                ])
+
+                # Objective 2: Pandas .style to format Price (INR) in Indian Rupees and highlight lowest price in green
+                styler = df_cat.style.format({
+                    "Price (INR)": format_rupees
+                }).highlight_min(subset=["Price (INR)"], color="#2E7D32")
+
+                # Objective 2: st.column_config with ProgressColumn bars for stats
+                col_config = {
+                    "Top Speed (km/h)": st.column_config.ProgressColumn(
+                        "Top Speed (km/h)",
+                        help="Maximum achievable speed",
+                        format="%d km/h",
+                        min_value=0,
+                        max_value=350,
+                    ),
+                    "0-100 km/h (s)": st.column_config.ProgressColumn(
+                        "0-100 km/h (s)",
+                        help="Acceleration sprint 0 to 100 km/h",
+                        format="%.1f s",
+                        min_value=0,
+                        max_value=15,
+                    ),
+                    "Power (BHP)": st.column_config.ProgressColumn(
+                        "Power (BHP)",
+                        help="Peak engine power output",
+                        format="%d BHP",
+                        min_value=0,
+                        max_value=1050,
+                    )
+                }
+
+                st.dataframe(
+                    styler,
+                    column_config=col_config,
+                    hide_index=True,
+                    use_container_width=True
+                )
+            else:
+                for row_idx in range(0, len(catalog_results), 3):
+                    cols = st.columns(3)
+                    for col_idx, item_idx in enumerate(range(row_idx, min(row_idx + 3, len(catalog_results)))):
+                        c_b, c_m, c_body, c_v, c_p, c_fuel, c_bhp, c_tq, c_acc, c_top, c_tr = catalog_results[item_idx]
+                        img_path = get_car_image(c_b, c_m)
+                        formatted_p = format_inr(c_p)
+
+                        with cols[col_idx]:
+                            with st.container(border=True):
+                                st.image(img_path, use_container_width=True)
+                                st.subheader(f"{c_b} {c_m}")
+                                st.caption(f"Trim: {c_v}")
+                                st.write(f"**Price:** {formatted_p}")
+                                st.write(f"**Specs:** {c_fuel} | {c_bhp} BHP | {c_acc}s 0-100")
+                                if st.button("Inspect Details", key=f"cat_btn_{item_idx}", use_container_width=True):
+                                    st.session_state["spec_brand"] = c_b
+                                    st.session_state["spec_model"] = c_m
+                                    st.session_state["spec_variant"] = c_v
+                                    st.info(f"Loaded {c_b} {c_m}: {c_v}. Navigate to the 'Car Details' tab.")
         else:
-            st.warning("No vehicles match the selected criteria. Try adjusting the maximum price or powertrain filter.")
+            st.info("No vehicles match the selected criteria. Adjust maximum price or powertrain filters.")
 
-    # ------------------ TAB 3: CAR DETAILS & SPECS ------------------
+    # ------------------ TAB 3: CAR DETAILS (WITH DYNAMIC EMI CALCULATOR) ------------------
     with tab3:
-        st.subheader("Deep-Dive Vehicle Specifications")
-        st.caption("Inspect mechanical output, high-resolution imagery, exterior finishes, and comprehensive equipment.")
+        st.subheader("Car Details & Engineering Specifications")
+        st.caption("Deep vehicle inspection, performance metrics, dynamic EMI calculator, and equipment list.")
 
         cursor.execute("SELECT brand_name FROM brands ORDER BY brand_name")
         brand_list = [b[0] for b in cursor.fetchall()]
 
-        # Helper callbacks to keep state clean on change
-        def on_spec_brand_change():
-            st.session_state.pop("spec_model", None)
-            st.session_state.pop("spec_variant", None)
+        with st.container(border=True):
+            col_s1, col_s2, col_s3 = st.columns(3)
+            with col_s1:
+                if "spec_brand" not in st.session_state or st.session_state["spec_brand"] not in brand_list:
+                    st.session_state["spec_brand"] = brand_list[0] if brand_list else None
+                selected_brand = st.selectbox("Manufacturer", brand_list, key="spec_brand")
 
-        def on_spec_model_change():
-            st.session_state.pop("spec_variant", None)
-
-        col_s1, col_s2, col_s3 = st.columns(3)
-        with col_s1:
-            selected_brand = st.selectbox("1. Brand", brand_list, key="spec_brand", on_change=on_spec_brand_change)
-
-        if selected_brand:
             cursor.execute("""
                 SELECT model_name FROM models m
                 JOIN brands b ON m.brand_id = b.brand_id
@@ -1630,358 +2009,642 @@ if mode == "User Mode":
             model_list = [m[0] for m in cursor.fetchall()]
 
             with col_s2:
-                selected_model = st.selectbox("2. Model", model_list, key="spec_model", on_change=on_spec_model_change)
+                if "spec_model" not in st.session_state or st.session_state["spec_model"] not in model_list:
+                    st.session_state["spec_model"] = model_list[0] if model_list else None
+                selected_model = st.selectbox("Model Line", model_list, key="spec_model")
 
-            if selected_model:
+            cursor.execute("""
+                SELECT v.variant_id, v.variant_name, v.price_inr, v.engine, v.power_bhp, v.torque_nm,
+                       v.top_speed_kmh, v.acceleration_0_100, v.transmission, v.drivetrain,
+                       v.fuel_type, v.mileage_range, v.seating_capacity, v.safety_rating
+                FROM variants v
+                JOIN models m ON v.model_id = m.model_id
+                JOIN brands b ON m.brand_id = b.brand_id
+                WHERE b.brand_name = %s AND m.model_name = %s
+                ORDER BY v.variant_name
+            """, (selected_brand, selected_model))
+            variant_rows = cursor.fetchall()
+
+            variant_names = [v[1] for v in variant_rows]
+            with col_s3:
+                if "spec_variant" not in st.session_state or st.session_state["spec_variant"] not in variant_names:
+                    st.session_state["spec_variant"] = variant_names[0] if variant_names else None
+                selected_variant = st.selectbox("Trim Variant", variant_names, key="spec_variant")
+
+        selected_row = next((v for v in variant_rows if v[1] == selected_variant), None)
+
+        if selected_row:
+            v_id, v_name, v_price, v_engine, v_bhp, v_torque, v_top_speed, v_accel, v_trans, v_drive, v_fuel, v_mileage, v_seats, v_safety = selected_row
+            raw_car_price = float(v_price or 0)
+            price_str = f"₹ {raw_car_price:,.2f}" if raw_car_price else "Price on Request"
+
+            with st.container(border=True):
+                col_img, col_hero = st.columns([1.2, 1])
+                with col_img:
+                    img_path = get_car_image(selected_brand, selected_model)
+                    st.image(img_path, caption=f"{selected_brand} {selected_model}", use_container_width=True)
+                with col_hero:
+                    st.subheader(f"{selected_brand} {selected_model}")
+                    st.caption(f"Trim: {v_name}")
+                    st.write(f"### {price_str}")
+                    st.write(f"**Engine Configuration:** {v_engine}")
+                    st.write(f"**Transmission:** {v_trans}")
+                    st.write(f"**Drivetrain:** {v_drive}")
+                    st.write(f"**Powertrain:** {v_fuel}")
+
+                    if st.button("Proceed to Book This Vehicle", type="primary", use_container_width=True):
+                        st.session_state["book_brand"] = selected_brand
+                        st.session_state["book_model"] = selected_model
+                        st.session_state["book_variant"] = selected_variant
+                        st.session_state["prefill_brand"] = selected_brand
+                        st.session_state["prefill_model"] = selected_model
+                        st.session_state["prefill_variant"] = selected_variant
+                        st.success(f"Vehicle selected: {selected_brand} {selected_model} ({selected_variant}). Navigate to 'Book a Car' tab.")
+
+            st.divider()
+
+            # Performance Specifications
+            st.subheader("Performance Specifications")
+            with st.container(border=True):
+                m1, m2, m3, m4 = st.columns(4)
+                with m1:
+                    st.metric(label="Power", value=f"{v_bhp} BHP")
+                with m2:
+                    st.metric(label="Torque", value=f"{v_torque} Nm")
+                with m3:
+                    st.metric(label="0 to 100 km/h", value=f"{v_accel} s")
+                with m4:
+                    st.metric(label="Top Speed", value=f"{v_top_speed} km/h")
+
+            st.subheader("Vehicle Engineering Details")
+            with st.container(border=True):
+                sp1, sp2, sp3, sp4 = st.columns(4)
+                with sp1:
+                    st.metric(label="Efficiency / Range", value=str(v_mileage))
+                with sp2:
+                    st.metric(label="Seating Capacity", value=f"{v_seats} Seats")
+                with sp3:
+                    st.metric(label="Safety Rating", value=str(v_safety))
+                with sp4:
+                    st.metric(label="Drivetrain", value=str(v_drive))
+
+            st.divider()
+
+            # Feature 3: Dynamic EMI Calculator (User Mode)
+            st.subheader("Dynamic Loan EMI Calculator")
+            st.caption("Calculate estimated monthly installments based on selected vehicle ex-showroom price.")
+            with st.container(border=True):
+                col_e1, col_e2, col_e3 = st.columns(3)
+                with col_e1:
+                    down_pay_pct = st.slider("Down Payment (%)", min_value=10, max_value=80, value=20, step=5, key="emi_dp_pct")
+                    down_pay_val = raw_car_price * (down_pay_pct / 100.0)
+                    st.caption(f"Down Payment Amount: ₹ {down_pay_val:,.2f}")
+                with col_e2:
+                    tenure_years = st.slider("Loan Tenure (Years)", min_value=1, max_value=7, value=5, step=1, key="emi_tenure_yrs")
+                    st.caption(f"Tenure Duration: {tenure_years * 12} Months")
+                with col_e3:
+                    interest_rate_pct = st.slider("Interest Rate (%)", min_value=7.0, max_value=15.0, value=8.5, step=0.25, key="emi_rate_pct")
+                    st.caption(f"Annual Percentage Rate (APR): {interest_rate_pct:.2f}%")
+
+                # Mathematical logic for EMI calculation: EMI = [P x r x (1+r)^n] / [(1+r)^n - 1]
+                loan_principal = raw_car_price - down_pay_val
+                tenure_months = tenure_years * 12
+                monthly_rate = (interest_rate_pct / 100.0) / 12.0
+
+                if monthly_rate > 0 and tenure_months > 0:
+                    monthly_emi = loan_principal * monthly_rate * ((1 + monthly_rate) ** tenure_months) / (((1 + monthly_rate) ** tenure_months) - 1)
+                else:
+                    monthly_emi = loan_principal / tenure_months if tenure_months else 0
+
+                total_repayment = monthly_emi * tenure_months
+                total_interest = total_repayment - loan_principal
+
+                # Prominent st.metric display
+                st.metric(
+                    label="Estimated Monthly EMI",
+                    value=f"₹ {monthly_emi:,.2f} / month",
+                    delta=f"Principal Debt: ₹ {loan_principal:,.2f} | Total Interest: ₹ {total_interest:,.2f}",
+                    delta_color="off"
+                )
+
+                df_emi_chart = pd.DataFrame({
+                    "Capital Component": ["Down Payment", "Principal Loan", "Total Interest Payable"],
+                    "Amount (INR)": [down_pay_val, loan_principal, total_interest]
+                }).set_index("Capital Component")
+                st.bar_chart(df_emi_chart)
+
+            st.divider()
+
+            # Expanders for secondary information
+            cursor.execute("SELECT feature_category, feature_description FROM features WHERE variant_id = %s", (v_id,))
+            features = cursor.fetchall()
+
+            with st.expander("Full Equipment & Features List", expanded=False):
+                if features:
+                    f_col1, f_col2 = st.columns(2)
+                    mid = (len(features) + 1) // 2
+                    with f_col1:
+                        for f in features[:mid]:
+                            st.write(f"**{f[0]}:** {f[1]}")
+                    with f_col2:
+                        for f in features[mid:]:
+                            st.write(f"**{f[0]}:** {f[1]}")
+                else:
+                    st.write("Standard factory specifications apply.")
+
+            cursor.execute("SELECT color_name, color_type FROM colors WHERE variant_id = %s", (v_id,))
+            colors_data = cursor.fetchall()
+
+            with st.expander("Available Color Options", expanded=False):
+                if colors_data:
+                    for c_name, c_type in colors_data:
+                        st.write(f"• **{c_type}:** {c_name}")
+                else:
+                    st.write("Standard factory exterior and interior finishes.")
+
+            with st.expander("Technical Specification Data Sheet", expanded=False):
+                spec_items = [
+                    {"Parameter": "Manufacturer", "Specification": selected_brand},
+                    {"Parameter": "Model Line", "Specification": selected_model},
+                    {"Parameter": "Variant Trim", "Specification": v_name},
+                    {"Parameter": "Ex-Showroom Price", "Specification": price_str},
+                    {"Parameter": "Engine Configuration", "Specification": v_engine},
+                    {"Parameter": "Peak Power Output", "Specification": f"{v_bhp} BHP"},
+                    {"Parameter": "Peak Torque Output", "Specification": f"{v_torque} Nm"},
+                    {"Parameter": "0-100 km/h Sprint", "Specification": f"{v_accel} s"},
+                    {"Parameter": "Top Speed", "Specification": f"{v_top_speed} km/h"},
+                    {"Parameter": "Transmission", "Specification": v_trans},
+                    {"Parameter": "Drivetrain", "Specification": v_drive},
+                    {"Parameter": "Powertrain Fuel", "Specification": v_fuel},
+                    {"Parameter": "Efficiency / Range", "Specification": v_mileage},
+                    {"Parameter": "Seating Capacity", "Specification": f"{v_seats} Passengers"},
+                    {"Parameter": "Safety Rating", "Specification": v_safety}
+                ]
+                st.dataframe(pd.DataFrame(spec_items), use_container_width=True, hide_index=True)
+        else:
+            st.info("Select a Manufacturer, Model Line, and Trim Variant above to inspect vehicle engineering specifications.")
+
+    # ------------------ TAB: DEDICATED EMI CALCULATOR ------------------
+    with tab_emi:
+        st.subheader("Dynamic Automotive Loan EMI Calculator")
+        st.caption("Interactively calculate loan installments, amortisation schedules, and financing requirements.")
+
+        cursor.execute("SELECT brand_name FROM brands ORDER BY brand_name")
+        all_calc_brands = [b[0] for b in cursor.fetchall()]
+
+        with st.container(border=True):
+            st.subheader("Select Vehicle to Finance")
+            col_eb1, col_eb2, col_eb3 = st.columns(3)
+            with col_eb1:
+                if "ded_emi_brand" not in st.session_state or st.session_state["ded_emi_brand"] not in all_calc_brands:
+                    prefill_b = st.session_state.get("spec_brand")
+                    st.session_state["ded_emi_brand"] = prefill_b if (prefill_b and prefill_b in all_calc_brands) else (all_calc_brands[0] if all_calc_brands else None)
+                sel_eb_brand = st.selectbox("Manufacturer", all_calc_brands, key="ded_emi_brand")
+
+            cursor.execute("""
+                SELECT model_name FROM models m
+                JOIN brands b ON m.brand_id = b.brand_id
+                WHERE b.brand_name = %s ORDER BY model_name
+            """, (sel_eb_brand,))
+            all_calc_models = [m[0] for m in cursor.fetchall()]
+
+            with col_eb2:
+                if "ded_emi_model" not in st.session_state or st.session_state["ded_emi_model"] not in all_calc_models:
+                    prefill_m = st.session_state.get("spec_model")
+                    st.session_state["ded_emi_model"] = prefill_m if (prefill_m and prefill_m in all_calc_models) else (all_calc_models[0] if all_calc_models else None)
+                sel_eb_model = st.selectbox("Model Line", all_calc_models, key="ded_emi_model")
+
+            cursor.execute("""
+                SELECT v.variant_id, v.variant_name, v.price_inr
+                FROM variants v
+                JOIN models m ON v.model_id = m.model_id
+                JOIN brands b ON m.brand_id = b.brand_id
+                WHERE b.brand_name = %s AND m.model_name = %s
+                ORDER BY v.variant_name
+            """, (sel_eb_brand, sel_eb_model))
+            all_calc_variants = cursor.fetchall()
+            calc_var_dict = {v[1]: float(v[2] or 0) for v in all_calc_variants}
+            calc_var_names = list(calc_var_dict.keys())
+
+            with col_eb3:
+                if "ded_emi_variant" not in st.session_state or st.session_state["ded_emi_variant"] not in calc_var_names:
+                    prefill_v = st.session_state.get("spec_variant")
+                    st.session_state["ded_emi_variant"] = prefill_v if (prefill_v and prefill_v in calc_var_names) else (calc_var_names[0] if calc_var_names else None)
+                sel_eb_variant = st.selectbox("Trim Variant", calc_var_names, key="ded_emi_variant")
+
+        car_calc_price = calc_var_dict.get(sel_eb_variant, 5000000.0)
+
+        col_fin1, col_fin2 = st.columns([1.1, 1])
+        with col_fin1:
+            with st.container(border=True):
+                st.subheader("Financing Controls")
+                st.write(f"**Selected Vehicle:** {sel_eb_brand} {sel_eb_model} ({sel_eb_variant})")
+                st.write(f"**Ex-Showroom Price:** ₹ {car_calc_price:,.2f}")
+
+                dp_pct = st.slider("Down Payment Percentage (%)", min_value=10, max_value=80, value=20, step=5, key="ded_calc_dp_pct")
+                dp_val = car_calc_price * (dp_pct / 100.0)
+                st.write(f"**Down Payment Capital:** ₹ {dp_val:,.2f}")
+
+                loan_years = st.slider("Loan Tenure (Years)", min_value=1, max_value=7, value=5, step=1, key="ded_calc_tenure_yrs")
+                st.write(f"**Tenure Duration:** {loan_years * 12} Monthly Installments")
+
+                apr_rate = st.slider("Annual Interest Rate (%)", min_value=7.0, max_value=15.0, value=8.5, step=0.25, key="ded_calc_apr_rate")
+                st.write(f"**Annual Interest Rate:** {apr_rate:.2f}% APR")
+
+        # EMI Math
+        net_principal = car_calc_price - dp_val
+        total_months = loan_years * 12
+        r_mo = (apr_rate / 100.0) / 12.0
+
+        if r_mo > 0 and total_months > 0:
+            emi_result = net_principal * r_mo * ((1 + r_mo) ** total_months) / (((1 + r_mo) ** total_months) - 1)
+        else:
+            emi_result = net_principal / total_months if total_months else 0
+
+        gross_repay = emi_result * total_months
+        total_interest_cost = gross_repay - net_principal
+
+        with col_fin2:
+            with st.container(border=True):
+                st.subheader("Amortisation & Monthly EMI")
+                st.metric(
+                    label="Estimated Monthly EMI",
+                    value=f"₹ {emi_result:,.2f} / month",
+                    delta=f"Principal: ₹ {net_principal:,.2f} | Total Interest: ₹ {total_interest_cost:,.2f}",
+                    delta_color="off"
+                )
+                st.divider()
+                st.write(f"**Net Financed Principal:** ₹ {net_principal:,.2f}")
+                st.write(f"**Total Interest Payable:** ₹ {total_interest_cost:,.2f}")
+                st.write(f"**Gross Total Repayment:** ₹ {gross_repay:,.2f}")
+
+                df_ded_chart = pd.DataFrame({
+                    "Capital Component": ["Down Payment", "Principal Loan", "Total Interest"],
+                    "Amount (INR)": [dp_val, net_principal, total_interest_cost]
+                }).set_index("Capital Component")
+                st.bar_chart(df_ded_chart)
+
+    # ------------------ TAB 4: COMPARE CARS (FEATURE 1) ------------------
+    with tab4:
+        st.subheader("Compare Cars")
+        st.caption("Select two different vehicles to compare side-by-side specs, visual profiles, and performance differentials.")
+
+        cursor.execute("SELECT brand_name FROM brands ORDER BY brand_name")
+        brand_list = [b[0] for b in cursor.fetchall()]
+
+        with st.container(border=True):
+            col_ca1, col_ca2 = st.columns(2)
+            with col_ca1:
+                st.write("#### Car A (Reference Vehicle)")
+                if "cmp_tab_a_brand" not in st.session_state or st.session_state["cmp_tab_a_brand"] not in brand_list:
+                    st.session_state["cmp_tab_a_brand"] = brand_list[0] if brand_list else None
+                c_a_brand = st.selectbox("Brand (A)", brand_list, key="cmp_tab_a_brand")
+                cursor.execute("""
+                    SELECT model_name FROM models m
+                    JOIN brands b ON m.brand_id = b.brand_id
+                    WHERE b.brand_name = %s ORDER BY model_name
+                """, (c_a_brand,))
+                models_a = [m[0] for m in cursor.fetchall()]
+                if "cmp_tab_a_model" not in st.session_state or st.session_state["cmp_tab_a_model"] not in models_a:
+                    st.session_state["cmp_tab_a_model"] = models_a[0] if models_a else None
+                c_a_model = st.selectbox("Model (A)", models_a, key="cmp_tab_a_model")
+
                 cursor.execute("""
                     SELECT v.variant_name, v.price_inr, v.engine, v.power_bhp, v.torque_nm,
                            v.top_speed_kmh, v.acceleration_0_100, v.transmission, v.drivetrain,
-                           v.fuel_type, v.mileage_range, v.seating_capacity, v.safety_rating, v.variant_id
+                           v.fuel_type, v.mileage_range, v.seating_capacity, v.safety_rating
                     FROM variants v
                     JOIN models m ON v.model_id = m.model_id
                     JOIN brands b ON m.brand_id = b.brand_id
                     WHERE b.brand_name = %s AND m.model_name = %s
                     ORDER BY v.variant_name
-                """, (selected_brand, selected_model))
-                variants = cursor.fetchall()
-                variant_names = [v[0] for v in variants]
+                """, (c_a_brand, c_a_model))
+                vars_a = cursor.fetchall()
+                v_a_names = [v[0] for v in vars_a]
+                if "cmp_tab_a_variant" not in st.session_state or st.session_state["cmp_tab_a_variant"] not in v_a_names:
+                    st.session_state["cmp_tab_a_variant"] = v_a_names[0] if v_a_names else None
+                c_a_var = st.selectbox("Variant (A)", v_a_names, key="cmp_tab_a_variant")
+                car_a_data = next((v for v in vars_a if v[0] == c_a_var), None)
 
-                with col_s3:
-                    selected_variant = st.selectbox("3. Variant", variant_names, key="spec_variant")
+            with col_ca2:
+                st.write("#### Car B (Comparison Vehicle)")
+                b_default_idx = min(1, len(brand_list) - 1)
+                if "cmp_tab_b_brand" not in st.session_state or st.session_state["cmp_tab_b_brand"] not in brand_list:
+                    st.session_state["cmp_tab_b_brand"] = brand_list[b_default_idx] if brand_list else None
+                c_b_brand = st.selectbox("Brand (B)", brand_list, key="cmp_tab_b_brand")
+                cursor.execute("""
+                    SELECT model_name FROM models m
+                    JOIN brands b ON m.brand_id = b.brand_id
+                    WHERE b.brand_name = %s ORDER BY model_name
+                """, (c_b_brand,))
+                models_b = [m[0] for m in cursor.fetchall()]
+                if "cmp_tab_b_model" not in st.session_state or st.session_state["cmp_tab_b_model"] not in models_b:
+                    st.session_state["cmp_tab_b_model"] = models_b[0] if models_b else None
+                c_b_model = st.selectbox("Model (B)", models_b, key="cmp_tab_b_model")
 
-                if selected_variant:
-                    v_data = next((v for v in variants if v[0] == selected_variant), None)
-                    if v_data:
-                        (v_name, v_price, v_engine, v_bhp, v_torque,
-                         v_top_speed, v_accel, v_trans, v_drive,
-                         v_fuel, v_mileage, v_seats, v_safety, v_id) = v_data
+                cursor.execute("""
+                    SELECT v.variant_name, v.price_inr, v.engine, v.power_bhp, v.torque_nm,
+                       v.top_speed_kmh, v.acceleration_0_100, v.transmission, v.drivetrain,
+                       v.fuel_type, v.mileage_range, v.seating_capacity, v.safety_rating
+                    FROM variants v
+                    JOIN models m ON v.model_id = m.model_id
+                    JOIN brands b ON m.brand_id = b.brand_id
+                    WHERE b.brand_name = %s AND m.model_name = %s
+                    ORDER BY v.variant_name
+                """, (c_b_brand, c_b_model))
+                vars_b = cursor.fetchall()
+                v_b_names = [v[0] for v in vars_b]
+                if "cmp_tab_b_variant" not in st.session_state or st.session_state["cmp_tab_b_variant"] not in v_b_names:
+                    st.session_state["cmp_tab_b_variant"] = v_b_names[0] if v_b_names else None
+                c_b_var = st.selectbox("Variant (B)", v_b_names, key="cmp_tab_b_variant")
+                car_b_data = next((v for v in vars_b if v[0] == c_b_var), None)
 
-                        st.markdown("---")
+        if car_a_data and car_b_data:
+            st.divider()
 
-                        # Dynamic Image Rendering
-                        safe_brand = selected_brand.replace(" ", "_")
-                        safe_model = selected_model.replace(" ", "_")
-                        image_filename = f"{safe_brand}_{safe_model}.jpg"
-                        image_path = os.path.join("images", image_filename)
+            # Side-by-side images using st.columns(2)
+            col_img_a, col_img_b = st.columns(2)
+            with col_img_a:
+                with st.container(border=True):
+                    img_a = get_car_image(c_a_brand, c_a_model)
+                    st.image(img_a, caption=f"Car A: {c_a_brand} {c_a_model} ({c_a_var})", use_container_width=True)
+                    st.subheader(f"{c_a_brand} {c_a_model}")
+                    st.caption(f"Trim: {c_a_var}")
+                    st.write(f"### ₹ {car_a_data[1]:,.2f}")
+                    st.write(f"**Powertrain:** {car_a_data[9]} | {car_a_data[7]}")
 
-                        img_col, summary_col = st.columns([1.2, 1])
+            with col_img_b:
+                with st.container(border=True):
+                    img_b = get_car_image(c_b_brand, c_b_model)
+                    st.image(img_b, caption=f"Car B: {c_b_brand} {c_b_model} ({c_b_var})", use_container_width=True)
+                    st.subheader(f"{c_b_brand} {c_b_model}")
+                    st.caption(f"Trim: {c_b_var}")
+                    st.write(f"### ₹ {car_b_data[1]:,.2f}")
+                    st.write(f"**Powertrain:** {car_b_data[9]} | {car_b_data[7]}")
 
-                        with img_col:
-                            if os.path.exists(image_path):
-                                st.image(image_path, use_container_width=True)
-                            else:
-                                st.image(
-                                    f"https://placehold.co/800x420/141821/E63946/png?text={safe_brand}+{safe_model}&font=outfit",
-                                    use_container_width=True
-                                )
-                                st.caption(f"💡 Place `{image_filename}` inside the `images/` directory to display a local photo.")
+            st.divider()
+            st.subheader("Performance Specification Differentials (Car B vs Car A)")
 
-                        with summary_col:
-                            st.markdown(f"<h2 style='margin-bottom: 2px;'>{selected_brand} {selected_model}</h2>", unsafe_allow_html=True)
-                            st.markdown(f"<span class='badge-pill'>{v_name}</span> <span class='badge-pill'>{v_fuel}</span>", unsafe_allow_html=True)
+            # Objective 3 Feature 1: Use st.metric() with delta parameter to compare specs visually
+            # E.g. If Car A has 500 BHP and Car B has 400 BHP, show Car B's power with red "-100 BHP" delta
+            delta_bhp = (car_b_data[3] or 0) - (car_a_data[3] or 0)
+            delta_torque = (car_b_data[4] or 0) - (car_a_data[4] or 0)
+            delta_accel = (car_b_data[6] or 0) - (car_a_data[6] or 0)
+            delta_top = (car_b_data[5] or 0) - (car_a_data[5] or 0)
+            delta_price = (car_b_data[1] or 0) - (car_a_data[1] or 0)
 
-                            price_str = f"₹{v_price:,.2f}" if v_price else "Price on Request"
-                            st.markdown(f"<div class='price-badge'>{price_str}</div>", unsafe_allow_html=True)
-                            st.markdown(f"**Engine Configuration:** {v_engine}")
-                            st.markdown(f"**Transmission:** {v_trans}")
-                            st.markdown(f"**Drivetrain:** {v_drive}")
+            with st.container(border=True):
+                m_c1, m_c2, m_c3, m_c4, m_c5 = st.columns(5)
+                with m_c1:
+                    st.metric(
+                        label="Power Output",
+                        value=f"{car_b_data[3]} BHP",
+                        delta=f"{delta_bhp:+d} BHP" if delta_bhp != 0 else "Equal to Car A"
+                    )
+                with m_c2:
+                    st.metric(
+                        label="Peak Torque",
+                        value=f"{car_b_data[4]} Nm",
+                        delta=f"{delta_torque:+d} Nm" if delta_torque != 0 else "Equal to Car A"
+                    )
+                with m_c3:
+                    st.metric(
+                        label="0-100 km/h Sprint",
+                        value=f"{car_b_data[6]} s",
+                        delta=f"{delta_accel:+.2f} s" if delta_accel != 0 else "Equal to Car A",
+                        delta_color="inverse"
+                    )
+                with m_c4:
+                    st.metric(
+                        label="Top Speed",
+                        value=f"{car_b_data[5]} km/h",
+                        delta=f"{delta_top:+d} km/h" if delta_top != 0 else "Equal to Car A"
+                    )
+                with m_c5:
+                    st.metric(
+                        label="Ex-Showroom Price",
+                        value=f"₹ {car_b_data[1]:,.0f}",
+                        delta=f"₹ {delta_price:+,.0f}",
+                        delta_color="off"
+                    )
 
-                            # Quick Book CTA
-                            if st.button("🛒 Proceed to Book This Vehicle", type="primary", use_container_width=True):
-                                st.session_state["prefill_brand"] = selected_brand
-                                st.session_state["prefill_model"] = selected_model
-                                st.session_state["prefill_variant"] = selected_variant
-                                st.session_state["book_brand"] = selected_brand
-                                st.session_state["book_model"] = selected_model
-                                st.session_state["book_variant"] = selected_variant
-                                st.success(" Vehicle configuration saved! Switch to the **'Book a Car'** tab above to finalize your reservation.")
+            st.subheader("Side-by-Side Detailed Technical Matrix")
+            cmp_matrix = [
+                {"Parameter": "Manufacturer", f"Car A: {c_a_brand} {c_a_model}": c_a_brand, f"Car B: {c_b_brand} {c_b_model}": c_b_brand},
+                {"Parameter": "Trim Variant", f"Car A: {c_a_brand} {c_a_model}": c_a_var, f"Car B: {c_b_brand} {c_b_model}": c_b_var},
+                {"Parameter": "Ex-Showroom Price", f"Car A: {c_a_brand} {c_a_model}": f"₹ {car_a_data[1]:,.2f}", f"Car B: {c_b_brand} {c_b_model}": f"₹ {car_b_data[1]:,.2f}"},
+                {"Parameter": "Engine Configuration", f"Car A: {c_a_brand} {c_a_model}": car_a_data[2], f"Car B: {c_b_brand} {c_b_model}": car_b_data[2]},
+                {"Parameter": "Peak Power Output", f"Car A: {c_a_brand} {c_a_model}": f"{car_a_data[3]} BHP", f"Car B: {c_b_brand} {c_b_model}": f"{car_b_data[3]} BHP"},
+                {"Parameter": "Peak Torque Output", f"Car A: {c_a_brand} {c_a_model}": f"{car_a_data[4]} Nm", f"Car B: {c_b_brand} {c_b_model}": f"{car_b_data[4]} Nm"},
+                {"Parameter": "Top Speed", f"Car A: {c_a_brand} {c_a_model}": f"{car_a_data[5]} km/h", f"Car B: {c_b_brand} {c_b_model}": f"{car_b_data[5]} km/h"},
+                {"Parameter": "0-100 km/h Sprint", f"Car A: {c_a_brand} {c_a_model}": f"{car_a_data[6]} s", f"Car B: {c_b_brand} {c_b_model}": f"{car_b_data[6]} s"},
+                {"Parameter": "Transmission", f"Car A: {c_a_brand} {c_a_model}": car_a_data[7], f"Car B: {c_b_brand} {c_b_model}": car_b_data[7]},
+                {"Parameter": "Drivetrain", f"Car A: {c_a_brand} {c_a_model}": car_a_data[8], f"Car B: {c_b_brand} {c_b_model}": car_b_data[8]},
+                {"Parameter": "Powertrain Fuel", f"Car A: {c_a_brand} {c_a_model}": car_a_data[9], f"Car B: {c_b_brand} {c_b_model}": car_b_data[9]},
+                {"Parameter": "Efficiency / Range", f"Car A: {c_a_brand} {c_a_model}": str(car_a_data[10]), f"Car B: {c_b_brand} {c_b_model}": str(car_b_data[10])},
+                {"Parameter": "Seating Capacity", f"Car A: {c_a_brand} {c_a_model}": f"{car_a_data[11]} Seats", f"Car B: {c_b_brand} {c_b_model}": f"{car_b_data[11]} Seats"},
+                {"Parameter": "Safety Rating", f"Car A: {c_a_brand} {c_a_model}": str(car_a_data[12]), f"Car B: {c_b_brand} {c_b_model}": str(car_b_data[12])}
+            ]
+            st.dataframe(pd.DataFrame(cmp_matrix), use_container_width=True, hide_index=True)
 
-                        st.write("")
-                        # 4 Performance Metric Cards
-                        m_c1, m_c2, m_c3, m_c4 = st.columns(4)
-                        with m_c1:
-                            st.markdown(f"""
-                                <div class="metric-card">
-                                    <div class="metric-label">⚡ Peak Power</div>
-                                    <div class="metric-value">{v_bhp} <span style="font-size: 0.9rem; font-weight: 500;">BHP</span></div>
-                                    <div class="metric-sub">Output Rating</div>
-                                </div>
-                            """, unsafe_allow_html=True)
-                        with m_c2:
-                            st.markdown(f"""
-                                <div class="metric-card">
-                                    <div class="metric-label">🔄 Peak Torque</div>
-                                    <div class="metric-value">{v_torque} <span style="font-size: 0.9rem; font-weight: 500;">Nm</span></div>
-                                    <div class="metric-sub">Engine Thrust</div>
-                                </div>
-                            """, unsafe_allow_html=True)
-                        with m_c3:
-                            st.markdown(f"""
-                                <div class="metric-card">
-                                    <div class="metric-label">⏱️ 0-100 km/h</div>
-                                    <div class="metric-value">{v_accel} <span style="font-size: 0.9rem; font-weight: 500;">sec</span></div>
-                                    <div class="metric-sub">Acceleration</div>
-                                </div>
-                            """, unsafe_allow_html=True)
-                        with m_c4:
-                            st.markdown(f"""
-                                <div class="metric-card">
-                                    <div class="metric-label">🏁 Top Speed</div>
-                                    <div class="metric-value">{v_top_speed} <span style="font-size: 0.9rem; font-weight: 500;">km/h</span></div>
-                                    <div class="metric-sub">Electronically Limited</div>
-                                </div>
-                            """, unsafe_allow_html=True)
-
-                        st.write("")
-                        # Extended Specifications Grid
-                        col_spec_a, col_spec_b = st.columns(2)
-                        with col_spec_a:
-                            st.markdown(f"**🛣️ Efficiency / Range:** {v_mileage}")
-                            st.markdown(f"**🪑 Seating Capacity:** {v_seats} Passengers")
-                        with col_spec_b:
-                            st.markdown(f"**🛡️ Safety Rating:** {v_safety}")
-                            st.markdown(f"**⚙️ Drivetrain:** {v_drive}")
-
-                        # Colors Section
-                        cursor.execute("SELECT color_name, color_type FROM colors WHERE variant_id = %s", (v_id,))
-                        colors_data = cursor.fetchall()
-                        if colors_data:
-                            st.write("---")
-                            st.subheader("🎨 Available Exterior & Interior Finishes")
-                            pills_html = ""
-                            for c_name, c_type in colors_data:
-                                for single_color in c_name.split(","):
-                                    single_color = single_color.strip()
-                                    if single_color:
-                                        pills_html += f"<span class='color-pill'>🎨 {single_color} ({c_type})</span>"
-                            st.markdown(pills_html, unsafe_allow_html=True)
-
-                        # Features Section
-                        cursor.execute("SELECT feature_category, feature_description FROM features WHERE variant_id = %s", (v_id,))
-                        features = cursor.fetchall()
-                        if features:
-                            st.write("---")
-                            st.subheader("✨ Key Equipment & Features")
-                            f_col1, f_col2 = st.columns(2)
-                            mid = (len(features) + 1) // 2
-                            with f_col1:
-                                for f in features[:mid]:
-                                    st.markdown(f"**• {f[0]}:** {f[1]}")
-                            with f_col2:
-                                for f in features[mid:]:
-                                    st.markdown(f"**• {f[0]}:** {f[1]}")
-
-    # ------------------ TAB 4: BOOK A CAR ------------------
-    with tab4:
-        st.subheader("Reserve Your Vehicle")
-        st.caption("Live cascading selection populated directly from database records. No manual typing required.")
+    # ------------------ TAB 5: BOOK A CAR ------------------
+    with tab5:
+        st.subheader("Vehicle Reservation & On-Road Calculator")
+        st.caption("Calculate accurate on-road capital requirements, loan EMI schedules, and book directly.")
 
         cursor.execute("SELECT brand_name FROM brands ORDER BY brand_name")
         all_brands = [b[0] for b in cursor.fetchall()]
 
-        # Callbacks to manage dynamic cascading dropdown state
-        def on_booking_brand_change():
-            st.session_state.pop("book_model", None)
-            st.session_state.pop("book_variant", None)
-            st.session_state.pop("prefill_model", None)
-            st.session_state.pop("prefill_variant", None)
+        with st.container(border=True):
+            col_b1, col_b2, col_b3 = st.columns(3)
 
-        def on_booking_model_change():
-            st.session_state.pop("book_variant", None)
-            st.session_state.pop("prefill_variant", None)
+            with col_b1:
+                if "book_brand" not in st.session_state or st.session_state["book_brand"] not in all_brands:
+                    prefill_b = st.session_state.get("prefill_brand")
+                    st.session_state["book_brand"] = prefill_b if (prefill_b and prefill_b in all_brands) else (all_brands[0] if all_brands else None)
+                booking_brand = st.selectbox("1. Manufacturer *", all_brands, key="book_brand")
 
-        # Cascading Selectors outside the form for immediate reactivity
-        col_b1, col_b2, col_b3 = st.columns(3)
+            cursor.execute("""
+                SELECT model_name FROM models m
+                JOIN brands b ON m.brand_id = b.brand_id
+                WHERE b.brand_name = %s ORDER BY model_name
+            """, (booking_brand,))
+            model_options = [m[0] for m in cursor.fetchall()]
 
-        with col_b1:
-            prefill_b = st.session_state.get("prefill_brand")
-            b_idx = all_brands.index(prefill_b) if prefill_b in all_brands else 0
-            booking_brand = st.selectbox(
-                "1. Select Brand *",
-                all_brands,
-                index=b_idx,
-                key="book_brand",
-                on_change=on_booking_brand_change
-            )
+            with col_b2:
+                if "book_model" not in st.session_state or st.session_state["book_model"] not in model_options:
+                    prefill_m = st.session_state.get("prefill_model")
+                    st.session_state["book_model"] = prefill_m if (prefill_m and prefill_m in model_options) else (model_options[0] if model_options else None)
+                booking_model = st.selectbox("2. Model Line *", model_options, key="book_model")
 
-        # Fetch Models for chosen brand
-        cursor.execute("""
-            SELECT model_name FROM models m
-            JOIN brands b ON m.brand_id = b.brand_id
-            WHERE b.brand_name = %s
-            ORDER BY model_name
-        """, (booking_brand,))
-        available_models = [m[0] for m in cursor.fetchall()]
+            cursor.execute("""
+                SELECT v.variant_id, v.variant_name, v.price_inr, v.engine, v.power_bhp, v.fuel_type, v.transmission
+                FROM variants v
+                JOIN models m ON v.model_id = m.model_id
+                JOIN brands b ON m.brand_id = b.brand_id
+                WHERE b.brand_name = %s AND m.model_name = %s
+                ORDER BY v.variant_name
+            """, (booking_brand, booking_model))
+            variant_records = cursor.fetchall()
+            variant_dict = {v[1]: v for v in variant_records}
+            variant_options = list(variant_dict.keys())
 
-        with col_b2:
-            prefill_m = st.session_state.get("prefill_model")
-            m_idx = available_models.index(prefill_m) if (prefill_m and prefill_m in available_models) else 0
-            booking_model = st.selectbox(
-                "2. Select Model *",
-                available_models,
-                index=m_idx,
-                key="book_model",
-                on_change=on_booking_model_change
-            )
-
-        # Fetch Variants for chosen model
-        cursor.execute("""
-            SELECT v.variant_id, v.variant_name, v.price_inr, v.engine, v.power_bhp, v.fuel_type, v.transmission
-            FROM variants v
-            JOIN models m ON v.model_id = m.model_id
-            JOIN brands b ON m.brand_id = b.brand_id
-            WHERE b.brand_name = %s AND m.model_name = %s
-            ORDER BY v.variant_name
-        """, (booking_brand, booking_model))
-        available_variants = cursor.fetchall()
-        variant_dict = {v[1]: v for v in available_variants}
-        variant_options = list(variant_dict.keys())
-
-        with col_b3:
-            prefill_v = st.session_state.get("prefill_variant")
-            v_idx = variant_options.index(prefill_v) if (prefill_v and prefill_v in variant_options) else 0
-            booking_variant = st.selectbox(
-                "3. Select Variant *",
-                variant_options,
-                index=v_idx,
-                key="book_variant"
-            )
+            with col_b3:
+                if "book_variant" not in st.session_state or st.session_state["book_variant"] not in variant_options:
+                    prefill_v = st.session_state.get("prefill_variant")
+                    st.session_state["book_variant"] = prefill_v if (prefill_v and prefill_v in variant_options) else (variant_options[0] if variant_options else None)
+                booking_variant = st.selectbox("3. Trim Variant *", variant_options, key="book_variant")
 
         selected_variant_record = variant_dict.get(booking_variant)
 
         if selected_variant_record:
             b_variant_id, _, b_price, b_engine, b_power, b_fuel, b_trans = selected_variant_record
+            raw_price = float(b_price or 0)
 
-            # Live Selected Vehicle Preview Card
-            st.markdown(f"""
-                <div class="glass-card" style="margin-top: 10px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-                        <div>
-                            <span class="badge-pill">SELECTED VEHICLE</span>
-                            <h3 style="margin: 4px 0 2px 0;">{booking_brand} {booking_model} — {booking_variant}</h3>
-                            <p style="color: #8B949E; margin: 0; font-size: 0.9rem;">
-                                {b_fuel} • {b_trans} • {b_power} BHP
-                            </p>
-                        </div>
-                        <div style="text-align: right;">
-                            <span style="color: #8B949E; font-size: 0.75rem; text-transform: uppercase;">Ex-Showroom Estimate</span>
-                            <div style="font-size: 1.6rem; font-weight: 800; color: #E63946; font-family: 'Outfit';">
-                                ₹{b_price:,.2f}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            """, unsafe_allow_html=True)
+            # Indian tax breakdown
+            rto_tax = raw_price * 0.10
+            insurance = raw_price * 0.035
+            tcs = (raw_price * 0.01) if raw_price > 1000000 else 0
+            on_road_total = raw_price + rto_tax + insurance + tcs
 
-            # Customer Details Form
-            with st.form("customer_reservation_form"):
-                st.subheader("Customer Contact & Delivery Information")
-                col_c1, col_c2 = st.columns(2)
+            st.divider()
+            col_calc, col_form = st.columns([1.1, 1.2])
 
-                with col_c1:
-                    c_name = st.text_input("Full Name *", placeholder="e.g. John Doe")
-                    c_contact = st.text_input("Phone Number *", placeholder="e.g. +91 98765 43210")
-                    c_city = st.selectbox("Preferred Dealership Location", [
-                        "Mumbai Flagship Centre",
-                        "Delhi NCR Hub",
-                        "Bengaluru Tech City Showroom",
-                        "Hyderabad Jubilee Hills",
-                        "Chennai Mount Road",
-                        "Pune Koregaon Park",
-                        "Kolkata Park Street",
-                        "Ahmedabad SG Highway"
-                    ])
+            with col_calc:
+                with st.container(border=True):
+                    st.subheader("On-Road Cost Breakdown")
+                    st.write(f"**Base Ex-Showroom:** ₹ {raw_price:,.2f}")
+                    st.write(f"**RTO Registration (10.0%):** ₹ {rto_tax:,.2f}")
+                    st.write(f"**Comprehensive Insurance (3.5%):** ₹ {insurance:,.2f}")
+                    if tcs > 0:
+                        st.write(f"**TCS Section 206C (1.0%):** ₹ {tcs:,.2f}")
+                    st.metric("Estimated On-Road Total", f"₹ {on_road_total:,.2f}")
 
-                with col_c2:
-                    c_email = st.text_input("Email Address *", placeholder="e.g. john.doe@example.com")
-                    c_date = st.date_input("Preferred Test Drive / Delivery Date")
-                    c_notes = st.text_area("Special Requests / Delivery Notes (Optional)", placeholder="e.g. Interested in custom interior upholstery options", height=68)
+                    st.divider()
+                    st.subheader("Loan EMI Calculator")
+                    book_dp_pct = st.slider("Down Payment (%)", min_value=10, max_value=80, value=20, step=5, key="book_calc_dp_pct")
+                    book_dp_amt = on_road_total * (book_dp_pct / 100.0)
+                    book_loan_principal = on_road_total - book_dp_amt
 
-                submit_booking = st.form_submit_button("🚀 Confirm Vehicle Reservation", type="primary", use_container_width=True)
+                    book_tenure_yrs = st.selectbox("Tenure Duration", [1, 2, 3, 4, 5, 6, 7], index=4, format_func=lambda y: f"{y} Years ({y*12} Months)", key="book_calc_tenure")
+                    book_tenure_months = book_tenure_yrs * 12
+                    book_apr_rate = st.slider("Annual Interest Rate (%)", min_value=7.0, max_value=15.0, value=8.5, step=0.25, key="book_calc_apr")
 
-                if submit_booking:
-                    # Validate inputs
-                    if not c_name or len(c_name.strip()) < 2:
-                        st.error("Please enter a valid Full Name.")
-                    elif not c_contact or len(c_contact.strip()) < 7:
-                        st.error("Please enter a valid Phone Number.")
-                    elif not c_email or "@" not in c_email or "." not in c_email:
-                        st.error("Please enter a valid Email Address.")
+                    book_mo_r = (book_apr_rate / 100.0) / 12.0
+                    if book_mo_r > 0 and book_tenure_months > 0:
+                        book_monthly_emi = book_loan_principal * book_mo_r * ((1 + book_mo_r) ** book_tenure_months) / (((1 + book_mo_r) ** book_tenure_months) - 1)
                     else:
-                        booking_id = generate_booking_id()
-                        contact_combined = f"{c_contact.strip()} ({c_city})"
-                        email_combined = f"{c_email.strip()} | Date: {c_date}"
-                        if c_notes.strip():
-                            email_combined += f" | Notes: {c_notes.strip()}"
+                        book_monthly_emi = book_loan_principal / book_tenure_months if book_tenure_months else 0
 
-                        try:
-                            cursor.execute("""
-                                INSERT INTO bookings (booking_id, variant_id, customer_name, customer_contact, customer_email, status)
-                                VALUES (%s, %s, %s, %s, %s, 'Active')
-                            """, (booking_id, b_variant_id, c_name.strip(), contact_combined, email_combined))
-                            conn.commit()
+                    book_total_payment = book_monthly_emi * book_tenure_months
+                    book_total_interest = book_total_payment - book_loan_principal
 
-                            st.session_state["confirmed_voucher"] = {
-                                "id": booking_id,
-                                "name": c_name.strip(),
-                                "contact": c_contact.strip(),
-                                "email": c_email.strip(),
-                                "city": c_city,
-                                "date": str(c_date),
-                                "brand": booking_brand,
-                                "model": booking_model,
-                                "variant": booking_variant,
-                                "price": b_price,
-                                "timestamp": datetime.now().strftime("%d %B %Y, %I:%M %p")
-                            }
-                            st.balloons()
-                            st.success(f" Vehicle Reservation Confirmed! Your Booking Reference ID is **{booking_id}**.")
-                        except Exception as e:
-                            st.error(f"Failed to record booking: {e}")
+                    st.metric(
+                        label="Estimated Monthly EMI",
+                        value=f"₹ {book_monthly_emi:,.2f} / mo",
+                        delta=f"Total Interest: ₹ {book_total_interest:,.2f}",
+                        delta_color="off"
+                    )
 
-            # Display Voucher if present
+                    df_book_emi = pd.DataFrame({
+                        "Component": ["Principal Debt", "Total Interest"],
+                        "Amount (INR)": [book_loan_principal, book_total_interest]
+                    }).set_index("Component")
+                    st.bar_chart(df_book_emi)
+
+            with col_form:
+                with st.container(border=True):
+                    with st.form("customer_reservation_form"):
+                        st.subheader("Customer Contact Information")
+                        c_name = st.text_input("Full Name *", placeholder="e.g. Rahul Sharma")
+                        c_contact = st.text_input("Phone Number *", placeholder="e.g. +91 98765 43210")
+                        c_email = st.text_input("Email Address *", placeholder="e.g. rahul.sharma@example.com")
+                        c_city = st.selectbox("Preferred Dealership Location", [
+                            "Mumbai Flagship Centre",
+                            "Delhi NCR Hub",
+                            "Bengaluru Tech City Showroom",
+                            "Hyderabad Jubilee Hills",
+                            "Chennai Mount Road",
+                            "Pune Koregaon Park",
+                            "Kolkata Park Street",
+                            "Ahmedabad SG Highway"
+                        ])
+                        c_date = st.date_input("Preferred Delivery Date")
+                        c_notes = st.text_area("Special Requests / Delivery Notes", placeholder="e.g. Requesting carbon package", height=70)
+
+                        submit_booking = st.form_submit_button("Confirm Booking", type="primary", use_container_width=True)
+
+                        if submit_booking:
+                            if not c_name or len(c_name.strip()) < 2:
+                                st.error("Validation Error: Full Name must contain at least 2 characters.")
+                            elif not c_contact or len(c_contact.strip()) < 7:
+                                st.error("Validation Error: Phone Number is malformed.")
+                            elif not c_email or "@" not in c_email or "." not in c_email:
+                                st.error("Validation Error: Email address format is invalid.")
+                            else:
+                                booking_id = generate_booking_id()
+                                tx_uuid = str(uuid.uuid4())
+                                contact_combined = f"{c_contact.strip()} ({c_city})"
+                                email_combined = f"{c_email.strip()} | Date: {c_date}"
+                                if c_notes.strip():
+                                    email_combined += f" | Notes: {c_notes.strip()}"
+
+                                checksum = hashlib.sha256(f"{booking_id}_{b_variant_id}_{c_email.strip()}".encode()).hexdigest()
+
+                                try:
+                                    cursor.execute("""
+                                        INSERT INTO bookings (booking_id, variant_id, customer_name, customer_contact, customer_email, status)
+                                        VALUES (%s, %s, %s, %s, %s, 'Active')
+                                    """, (booking_id, b_variant_id, c_name.strip(), contact_combined, email_combined))
+                                    conn.commit()
+
+                                    st.session_state["confirmed_voucher"] = {
+                                        "id": booking_id,
+                                        "uuid": tx_uuid,
+                                        "checksum": checksum,
+                                        "name": c_name.strip(),
+                                        "contact": c_contact.strip(),
+                                        "email": c_email.strip(),
+                                        "city": c_city,
+                                        "date": str(c_date),
+                                        "brand": booking_brand,
+                                        "model": booking_model,
+                                        "variant": booking_variant,
+                                        "price": b_price,
+                                        "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+                                    }
+                                    st.success(f"Booking Confirmed. Reference: {booking_id}")
+                                except Exception as e:
+                                    st.error(f"Database Write Failure: {e}")
+
             if "confirmed_voucher" in st.session_state:
                 vch = st.session_state["confirmed_voucher"]
-                st.markdown(f"""
-                    <div class="voucher-card">
-                        <div class="voucher-header">
-                            <div>
-                                <span class="badge-pill">VIP RESERVATION CERTIFICATE</span>
-                                <div class="voucher-id">{vch['id']}</div>
-                            </div>
-                            <div style="text-align: right;">
-                                <span style="color: #3FB950; font-weight: 700;">● STATUS: ACTIVE</span><br/>
-                                <small style="color: #8B949E;">{vch['timestamp']}</small>
-                            </div>
-                        </div>
-                        <div style="display: flex; justify-content: space-between; flex-wrap: wrap;">
-                            <div>
-                                <p style="margin: 0; color: #8B949E; font-size: 0.8rem; text-transform: uppercase;">Reserved Vehicle</p>
-                                <h3 style="margin: 2px 0 10px 0;">{vch['brand']} {vch['model']}</h3>
-                                <p style="margin: 0; color: #C9D1D9;"><strong>Trim:</strong> {vch['variant']}</p>
-                                <p style="margin: 0; color: #C9D1D9;"><strong>Ex-Showroom:</strong> ₹{vch['price']:,.2f}</p>
-                            </div>
-                            <div>
-                                <p style="margin: 0; color: #8B949E; font-size: 0.8rem; text-transform: uppercase;">Customer Information</p>
-                                <h4 style="margin: 2px 0 10px 0;">{vch['name']}</h4>
-                                <p style="margin: 0; color: #C9D1D9;"><strong>Phone:</strong> {vch['contact']}</p>
-                                <p style="margin: 0; color: #C9D1D9;"><strong>Email:</strong> {vch['email']}</p>
-                                <p style="margin: 0; color: #C9D1D9;"><strong>Centre:</strong> {vch['city']}</p>
-                            </div>
-                        </div>
-                    </div>
-                """, unsafe_allow_html=True)
+                with st.container(border=True):
+                    st.subheader("Vehicle Reservation Confirmation")
+                    st.caption(f"Reference ID: {vch['id']} | Status: Active | Timestamp: {vch['timestamp_utc']}")
+                    st.divider()
+                    vc1, vc2 = st.columns(2)
+                    with vc1:
+                        st.write("**Vehicle Reserved:**")
+                        st.write(f"### {vch['brand']} {vch['model']}")
+                        st.write(f"**Trim:** {vch['variant']}")
+                        st.write(f"**Ex-Showroom Price:** ₹ {vch['price']:,.2f}")
+                    with vc2:
+                        st.write("**Customer Information:**")
+                        st.write(f"**Name:** {vch['name']}")
+                        st.write(f"**Contact:** {vch['contact']}")
+                        st.write(f"**Email:** {vch['email']}")
+                        st.write(f"**Dealership Centre:** {vch['city']}")
+                    st.caption(f"UUID: {vch['uuid']} | SHA256: {vch['checksum']}")
 
-# ===================== ADMIN MODE =====================
+
+# ==============================================================================
+# ADMIN MODE (WITH ADMIN ANALYTICS DASHBOARD - FEATURE 2)
+# ==============================================================================
 elif mode == "Admin Mode":
-    st.markdown("""
-        <div class="hero-banner" style="border-color: rgba(88, 166, 255, 0.35);">
-            <div>
-                <h1 class="hero-title" style="background: linear-gradient(90deg, #FFFFFF, #58A6FF);">AutoSpec Admin Console</h1>
-                <p class="hero-subtitle">Manage customer bookings, audit database records, and monitor cloud deployment architecture.</p>
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
+    st.title("AutoSpec Administration Console")
+    st.caption("Manage customer bookings, review visual analytics, audit database records, and monitor cloud architecture.")
+    st.divider()
 
     if "admin_logged_in" not in st.session_state:
         st.session_state["admin_logged_in"] = False
@@ -1989,26 +2652,23 @@ elif mode == "Admin Mode":
     if not st.session_state["admin_logged_in"]:
         col_l1, col_l2 = st.columns([1, 1])
         with col_l1:
-            st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-            st.subheader("🔐 Administrative Authentication")
-            st.caption("Please enter your administrative master password.")
-            admin_pw = st.text_input("Admin Password", type="password")
-            if st.button("Unlock Dashboard", type="primary", use_container_width=True):
-                if admin_pw == ADMIN_PASSWORD:
-                    st.session_state["admin_logged_in"] = True
-                    st.rerun()
-                else:
-                    st.error("Incorrect Password! Access Denied.")
-            st.markdown("</div>", unsafe_allow_html=True)
+            with st.container(border=True):
+                st.subheader("Administrative Authentication")
+                st.caption("Enter administrative master password to access records.")
+                admin_pw = st.text_input("Master Password", type="password")
+                if st.button("Unlock Dashboard", type="primary", use_container_width=True):
+                    if admin_pw == ADMIN_PASSWORD:
+                        st.session_state["admin_logged_in"] = True
+                        st.rerun()
+                    else:
+                        st.error("Authentication Error: Invalid Master Password. Access Denied.")
     else:
-        # Admin Top Bar with Logout
         col_t1, col_t2 = st.columns([4, 1])
         with col_t2:
-            if st.button("🚪 Logout Admin", type="secondary", use_container_width=True):
+            if st.button("Log Out", type="secondary", use_container_width=True):
                 st.session_state["admin_logged_in"] = False
                 st.rerun()
 
-        # Dashboard KPI Counters
         cursor.execute("SELECT COUNT(*) FROM bookings")
         total_bookings = cursor.fetchone()[0]
 
@@ -2023,50 +2683,75 @@ elif mode == "Admin Mode":
 
         kpi1, kpi2, kpi3, kpi4 = st.columns(4)
         with kpi1:
-            st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-label">Total Reservations</div>
-                    <div class="metric-value">{total_bookings}</div>
-                    <div class="metric-sub">Customer Bookings</div>
-                </div>
-            """, unsafe_allow_html=True)
+            with st.container(border=True):
+                st.metric("Total Reservations", total_bookings)
         with kpi2:
-            st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-label">Active Brands</div>
-                    <div class="metric-value">{total_brands}</div>
-                    <div class="metric-sub">Manufacturers</div>
-                </div>
-            """, unsafe_allow_html=True)
+            with st.container(border=True):
+                st.metric("Active Brands", total_brands)
         with kpi3:
-            st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-label">Vehicle Models</div>
-                    <div class="metric-value">{total_models}</div>
-                    <div class="metric-sub">Platform Lines</div>
-                </div>
-            """, unsafe_allow_html=True)
+            with st.container(border=True):
+                st.metric("Vehicle Models", total_models)
         with kpi4:
-            st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-label">Variants Registered</div>
-                    <div class="metric-value">{total_variants}</div>
-                    <div class="metric-sub">Trim Configurations</div>
-                </div>
-            """, unsafe_allow_html=True)
+            with st.container(border=True):
+                st.metric("Variants Registered", total_variants)
 
-        st.write("")
+        st.divider()
+
         admin_tab1, admin_tab2, admin_tab3 = st.tabs([
-            "📋 Customer Bookings",
-            "⚙️ Database Management",
-            "☁️ Cloud Deployment & Export"
+            "Customer Bookings",
+            "Database Operations",
+            "Cloud Deployment & Export"
         ])
 
-        # TAB 1: VIEW & MANAGE BOOKINGS
         with admin_tab1:
-            st.subheader("Customer Vehicle Bookings")
-            st.caption("Review all customer reservations, filter by booking status, or download data as CSV.")
+            st.subheader("Customer Vehicle Bookings Audit")
+            st.caption("Review active records, filter by transaction status, or export CSV audit files.")
 
+            # Feature 2: Admin Analytics Dashboard (Admin Mode)
+            # Above the booking DataFrame, add visual analytics section using native st.bar_chart() or st.line_chart()
+            cursor.execute("""
+                SELECT b.brand_name, COUNT(bk.booking_id) as booking_count
+                FROM brands b
+                JOIN models m ON b.brand_id = m.brand_id
+                JOIN variants v ON m.model_id = v.model_id
+                JOIN bookings bk ON v.variant_id = bk.variant_id
+                GROUP BY b.brand_name
+                ORDER BY booking_count DESC
+            """)
+            brand_analytics_rows = cursor.fetchall()
+
+            cursor.execute("""
+                SELECT DATE(bk.booking_date) as b_date, COUNT(*) as daily_count
+                FROM bookings bk
+                GROUP BY DATE(bk.booking_date)
+                ORDER BY b_date ASC
+            """)
+            time_analytics_rows = cursor.fetchall()
+
+            with st.container(border=True):
+                st.subheader("Admin Visual Analytics Dashboard")
+                st.caption("Executive overview of booking distribution across manufacturers and demand volume over time.")
+
+                col_an1, col_an2 = st.columns(2)
+                with col_an1:
+                    st.write("#### Total Bookings per Brand")
+                    if brand_analytics_rows:
+                        df_brand_chart = pd.DataFrame(brand_analytics_rows, columns=["Brand", "Total Bookings"]).set_index("Brand")
+                        st.bar_chart(df_brand_chart)
+                    else:
+                        st.info("No bookings recorded yet to populate brand chart.")
+
+                with col_an2:
+                    st.write("#### Bookings Timeline (Daily Volume)")
+                    if time_analytics_rows:
+                        df_time_chart = pd.DataFrame(time_analytics_rows, columns=["Date", "Bookings"]).set_index("Date")
+                        st.line_chart(df_time_chart)
+                    else:
+                        st.info("No chronological transaction data available.")
+
+            st.divider()
+
+            # Booking DataFrame & Controls
             cursor.execute("""
                 SELECT bk.booking_id, b.brand_name, m.model_name, v.variant_name,
                        bk.customer_name, bk.customer_contact, bk.customer_email,
@@ -2085,12 +2770,11 @@ elif mode == "Admin Mode":
                     "Customer Name", "Contact", "Email / Notes", "Date", "Status"
                 ])
 
-                # Filters
                 col_f1, col_f2 = st.columns([1, 2])
                 with col_f1:
-                    status_filter = st.selectbox("Filter by Status", ["All", "Active", "Confirmed", "Delivered", "Cancelled"])
+                    status_filter = st.selectbox("Filter Status", ["All", "Active", "Confirmed", "Delivered", "Cancelled"])
                 with col_f2:
-                    search_cust = st.text_input("Search Customer / Booking ID", placeholder="Search by name or BK reference...")
+                    search_cust = st.text_input("Search (Customer Name / Booking ID)", placeholder="Search customer name or reference ID...")
 
                 filtered_df = df_books
                 if status_filter != "All":
@@ -2108,110 +2792,103 @@ elif mode == "Admin Mode":
                 with col_down:
                     csv_data = filtered_df.to_csv(index=False).encode('utf-8')
                     st.download_button(
-                        label="📥 Export Bookings as CSV",
+                        label="Export Bookings (CSV)",
                         data=csv_data,
                         file_name=f"autospec_bookings_{datetime.now().strftime('%Y%m%d')}.csv",
                         mime="text/csv"
                     )
 
                 with col_upd:
-                    with st.expander("Update Booking Status"):
+                    with st.expander("Update Transaction State"):
                         all_ids = df_books["Booking ID"].tolist()
-                        sel_id = st.selectbox("Select Booking ID", all_ids)
-                        new_st = st.selectbox("New Status", ["Active", "Confirmed", "Delivered", "Cancelled"])
-                        if st.button("Apply Status Change"):
+                        sel_id = st.selectbox("Select Target ID", all_ids)
+                        new_st = st.selectbox("Transition To", ["Active", "Confirmed", "Delivered", "Cancelled"])
+                        if st.button("Commit State Change"):
                             cursor.execute("UPDATE bookings SET status = %s WHERE booking_id = %s", (new_st, sel_id))
                             conn.commit()
-                            st.success(f"Updated status of {sel_id} to '{new_st}'.")
+                            st.success(f"State transitioned for {sel_id} to {new_st}.")
                             st.rerun()
             else:
-                st.info("No bookings recorded yet. Head to the 'Book a Car' tab in User Mode to submit a test reservation!")
+                st.info("No booking records currently committed. Create a test transaction in User Mode.")
 
-        # TAB 2: DATABASE CONTROLS
         with admin_tab2:
-            st.subheader("Database Maintenance Controls")
-            st.caption("Administrative reset utility to wipe and reload all curated sample brands, models, and specs.")
+            st.subheader("Database Operations & Integrity")
+            st.caption("Administrative reset routine to purge existing tables and reload curated production datasets with strict crosschecking.")
 
-            st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-            st.warning("⚠️ **Caution:** Resetting the database will permanently delete all customer bookings and reload default sample data.")
-            confirm_reset = st.checkbox("I acknowledge this will wipe all booking records and restore factory data.")
-            if st.button("⚠️ Factory Reset Database", disabled=not confirm_reset):
-                try:
-                    cursor.execute("DELETE FROM bookings")
-                    cursor.execute("DELETE FROM features")
-                    cursor.execute("DELETE FROM colors")
-                    cursor.execute("DELETE FROM variants")
-                    cursor.execute("DELETE FROM models")
-                    cursor.execute("DELETE FROM brands")
-                    conn.commit()
-                    insert_sample_data(cursor, conn)
-                    st.success("Database Reset and Reloaded Successfully!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Reset failed: {e}")
-            st.markdown("</div>", unsafe_allow_html=True)
+            with st.container(border=True):
+                st.warning("Warning: Resetting the database drops all booking logs and repopulates the factory dataset.")
+                confirm_reset = st.checkbox("Acknowledge permanent table reset and re-seed.")
+                if st.button("Execute Factory Reset", disabled=not confirm_reset):
+                    try:
+                        cursor.execute("DELETE FROM bookings")
+                        cursor.execute("DELETE FROM features")
+                        cursor.execute("DELETE FROM colors")
+                        cursor.execute("DELETE FROM variants")
+                        cursor.execute("DELETE FROM models")
+                        cursor.execute("DELETE FROM brands")
+                        conn.commit()
+                        insert_sample_data(cursor, conn)
+                        st.success("Database Purged and Re-seeded with Full Crosschecking Successfully.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Execution Error: {e}")
 
-        # TAB 3: CLOUD DEPLOYMENT & EXPORT
         with admin_tab3:
-            st.subheader("Cloud Deployment Architecture")
-            st.caption("Migrate your local database to a cloud relational database for Streamlit Community Cloud.")
+            st.subheader("Cloud Infrastructure & Migration")
+            st.caption("Deployment parameters, live socket benchmarks, and full relational export.")
 
             col_inf1, col_inf2 = st.columns(2)
             with col_inf1:
-                st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-                st.markdown("#### 📡 Active Database Connection")
-                st.markdown(f"**Connection Source:** `{db_source}`")
-                st.markdown(f"**Host:** `{db_cfg.get('host')}`")
-                st.markdown(f"**Port:** `{db_cfg.get('port')}`")
-                st.markdown(f"**Database:** `{db_cfg.get('database')}`")
-                st.markdown(f"**User:** `{db_cfg.get('user')}`")
+                with st.container(border=True):
+                    st.subheader("Active Socket Telemetry")
+                    st.write(f"**Connection Mode:** `{db_source}`")
+                    st.write(f"**Host Endpoint:** `{db_cfg.get('host')}`")
+                    st.write(f"**Port:** `{db_cfg.get('port')}`")
+                    st.write(f"**Database Schema:** `{db_cfg.get('database')}`")
+                    st.write(f"**Authenticated User:** `{db_cfg.get('user')}`")
 
-                # Latency ping test
-                if st.button("⚡ Test Connection Ping"):
-                    t0 = time.time()
-                    cursor.execute("SELECT 1")
-                    cursor.fetchall()
-                    latency_ms = (time.time() - t0) * 1000
-                    st.success(f"Connection healthy! Latency: **{latency_ms:.1f} ms**")
-                st.markdown("</div>", unsafe_allow_html=True)
+                    if st.button("Benchmark Socket Ping"):
+                        t_ping = time.time()
+                        cursor.execute("SELECT 1")
+                        cursor.fetchall()
+                        ping_ms = (time.time() - t_ping) * 1000
+                        st.success(f"Socket healthy: {ping_ms:.2f} ms roundtrip.")
 
             with col_inf2:
-                st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-                st.markdown("#### 📦 1-Click Database SQL Export")
-                st.markdown("Generate a complete SQL file (`schema + all car data + bookings`) ready to run in any cloud MySQL database console.")
+                with st.container(border=True):
+                    st.subheader("Database SQL Backup")
+                    st.write("Generate a deterministic SQL file containing DDL schema definitions and complete INSERT rows.")
 
-                sql_dump = generate_sql_dump(cursor)
-                st.download_button(
-                    label="💾 Download Database Backup (.sql)",
-                    data=sql_dump,
-                    file_name=f"autospec_database_backup_{datetime.now().strftime('%Y%m%d')}.sql",
-                    mime="application/sql",
-                    type="primary",
-                    use_container_width=True
-                )
-                st.caption("Compatible with TiDB Cloud, AWS RDS, Supabase, and MySQL 8+.")
-                st.markdown("</div>", unsafe_allow_html=True)
+                    sql_dump = generate_sql_dump(cursor)
+                    st.download_button(
+                        label="Download Relational Dump (.sql)",
+                        data=sql_dump,
+                        file_name=f"autospec_relational_backup_{datetime.now().strftime('%Y%m%d')}.sql",
+                        mime="application/sql",
+                        type="primary",
+                        use_container_width=True
+                    )
+                    st.caption("Compatible with MySQL 8.0, TiDB Serverless, and AWS RDS.")
 
-            st.write("")
-            st.markdown("### 🚀 Fast Cloud Migration Steps")
+            st.divider()
+            st.subheader("Cloud Migration Specification")
             st.markdown("""
-            1. **Set Up Free Cloud MySQL**: Create a free Serverless MySQL cluster on [TiDB Cloud](https://tidbcloud.com) or [AWS RDS Free Tier](https://aws.amazon.com/rds/).
-            2. **Import Data**: Run the downloaded `.sql` file in your cloud database web console (or let AutoSpec auto-create tables on launch).
-            3. **Configure Secrets**: Add your cloud credentials in `.streamlit/secrets.toml` or Streamlit Community Cloud Secrets:
+            1. **Provision MySQL Cluster**: Deploy serverless instance on TiDB Cloud or AWS RDS.
+            2. **Apply DDL & Seed**: Execute the downloaded `.sql` file in the database console.
+            3. **Bind Secrets**: Update `.streamlit/secrets.toml` or Streamlit Community Cloud environment:
             ```toml
             [mysql]
-            host = "your-cloud-host.com"
+            host = "your-cluster-endpoint.com"
             port = 4000
             user = "your_user"
             password = "your_password"
             database = "AutoSpec_Database_System"
             ssl_verify_cert = true
             ```
-            4. **Deploy App**: Connect your GitHub repo to [share.streamlit.io](https://share.streamlit.io) and deploy with zero configuration!
-            *(See `DEPLOYMENT.md` in project root for complete walkthrough).*
+            4. **Production Deploy**: Link GitHub repository to share.streamlit.io.
             """)
 
-# Clean up database resources safely
+# Gracefully close connections
 try:
     cursor.close()
     conn.close()
